@@ -1,0 +1,31 @@
+name: Test
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Test
+        run: node --test tests/*.test.js
+
+      # The fields omarchy-shell checks before loading the plugin
+      - name: Manifest
+        run: |
+          jq -e '.schemaVersion == 1 and .id == "rzilient.pulzar" and (.kinds | index("bar-widget")) and (.entryPoints.barWidget | type == "string")' manifest.json
+          test -f "$(jq -r .entryPoints.barWidget manifest.json)"

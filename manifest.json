@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "id": "rzilient.pulzar",
+  "name": "Pulzar",
+  "version": "1.0.0",
+  "author": "rzilient",
+  "license": "MIT",
+  "homepage": "https://github.com/rzilient-club/omarchy-pulzar",
+  "description": "Device status of the Pulzar telemetry agent by rzilient: telemetry state, memory, storage, battery, system information, collected inputs and installed programs, with a copy of the support information.",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "Pulzar",
+    "description": "Latest data collected by the telemetry agent on this device",
+    "category": "System",
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "snapshotPath": "/var/lib/telegraf/systray/latest.lp",
+      "refreshIntervalSec": 5
+    },
+    "schema": [
+      {
+        "key": "snapshotPath",
+        "type": "path",
+        "label": "Snapshot",
+        "defaultValue": "/var/lib/telegraf/systray/latest.lp",
+        "description": "File written by the systray output of the agent."
+      },
+      {
+        "key": "refreshIntervalSec",
+        "type": "integer",
+        "label": "Refresh interval (seconds)",
+        "min": 1,
+        "max": 300,
+        "step": 1,
+        "defaultValue": 5
+      }
+    ]
+  }
+}
