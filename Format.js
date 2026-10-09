@@ -23,6 +23,14 @@ function formatBytes(value, t) {
   return decimal(value / Math.pow(1024, 3), 1, t) + " " + t.byteUnit
 }
 
+// A traffic counter starts at zero and stays there on an interface nothing has
+// used yet: unlike a total the agent never reported, that zero is an answer and
+// must not read as "unknown"
+function formatCounter(value, t) {
+  if (value === null || value === undefined) return t.unknown
+  return decimal(value / Math.pow(1024, 3), 1, t) + " " + t.byteUnit
+}
+
 function formatPercent(value, t) {
   if (value === null || value === undefined) return t.unknown
   return decimal(value, 0, t) + " %"
@@ -88,6 +96,16 @@ function encryptionAssessment(encrypted, t) {
 // A load average reads as two decimals, the way uptime prints it
 function formatLoad(value) {
   return (Math.round(value * 100) / 100).toFixed(2)
+}
+
+// Share of the arriving packets an interface threw away, as a string with two
+// decimals. Null when nothing has arrived, where a share would mean nothing.
+function dropShare(entry) {
+  var arrived = entry.packetsReceived + entry.dropsIn
+
+  if (!arrived) return null
+
+  return (Math.round((entry.dropsIn / arrived) * 10000) / 100).toFixed(2)
 }
 
 function usageTone(percent) {
@@ -198,11 +216,13 @@ if (typeof module !== "undefined") {
     VISIBLE_PROGRAMS: VISIBLE_PROGRAMS,
     VISIBLE_SEARCH_RESULTS: VISIBLE_SEARCH_RESULTS,
     formatBytes: formatBytes,
+    formatCounter: formatCounter,
     formatPercent: formatPercent,
     formatTemperature: formatTemperature,
     usagePercent: usagePercent,
     usageTone: usageTone,
     formatLoad: formatLoad,
+    dropShare: dropShare,
     formatDateTime: formatDateTime,
     formatTime: formatTime,
     inputName: inputName,

@@ -237,3 +237,44 @@ test("reports no load average when the agent sent none", () => {
   const hardware = Snapshot.build(systemLine("ram.total=16u"), "", snapshotTime).hardware
   assert.equal(hardware.cpuLoad, undefined)
 })
+
+const netLines = lines => Snapshot.parseSnapshot([
+  "systray_snapshot running=true,stale_after=1800i 1759230000000000000",
+].concat(lines).join("\n"))
+
+test("collects one entry per interface, sorted by name", () => {
+  const status = Snapshot.build(netLines([
+    "net,host=S,interface=wlp1s0 bytes_recv=0u,bytes_sent=0u,packets_recv=0u,drop_in=0u,speed=-1i 1759229400000000000",
+    "net,host=S,interface=enp2s0 bytes_recv=21685669533u,bytes_sent=4983648727u,packets_recv=21413572u,drop_in=216807u,err_in=3u,speed=1000i 1759229400000000000",
+  ]), "", snapshotTime)
+
+  assert.deepEqual(status.interfaces.map(one => one.name), ["enp2s0", "wlp1s0"])
+
+  const [wired, wireless] = status.interfaces
+  assert.equal(wired.bytesReceived, 21685669533)
+  assert.equal(wired.dropsIn, 216807)
+  assert.equal(wired.errorsIn, 3)
+  assert.equal(wired.linkMegabits, 1000)
+  // -1 is the driver saying it does not know, not a speed
+  assert.equal(wireless.linkMegabits, undefined)
+  assert.equal(wireless.bytesReceived, 0)
+})
+
+test("keeps the newest reading of an interface", () => {
+  const status = Snapshot.build(netLines([
+    "net,host=S,interface=enp2s0 bytes_recv=100u 1759229400000000000",
+    "net,host=S,interface=enp2s0 bytes_recv=200u 1759229460000000000",
+    "net,host=S,interface=enp2s0 bytes_recv=150u 1759229410000000000",
+  ]), "", snapshotTime)
+
+  assert.equal(status.interfaces.length, 1)
+  assert.equal(status.interfaces[0].bytesReceived, 200)
+})
+
+test("ignores a net metric with no interface tag", () => {
+  const status = Snapshot.build(netLines([
+    "net,host=S bytes_recv=100u 1759229400000000000",
+  ]), "", snapshotTime)
+
+  assert.deepEqual(status.interfaces, [])
+})

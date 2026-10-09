@@ -33,6 +33,7 @@ Panel {
   // A gauge, not a chip: the memory meter beside it already wears the chip
   readonly property string iconProcessor: "\u{F04C5}"
   readonly property string iconSwap: "\u{F04E1}"
+  readonly property string iconNetwork: "\u{F0317}"
 
   // Arch's own page on dm-crypt: the distribution this runs on, and the only
   // instructions that cover converting a partition that is already in use
@@ -507,6 +508,67 @@ Panel {
               InfoRow { theme: tones; label: pulzar.t.manufacturingDate; value: pulzar.computer ? (pulzar.computer.manufacturingDate || pulzar.t.unknown) : "" }
               InfoRow { theme: tones; label: pulzar.t.agentVersion; value: pulzar.computer ? (pulzar.computer.agentVersion || pulzar.t.unknown) : "" }
               InfoRow { theme: tones; label: pulzar.t.systemInformationCollectedAt; value: pulzar.computer ? Format.formatDateTime(pulzar.computer.collectedAt, pulzar.t) : "" }
+            }
+          }
+
+          // ---------- Network ----------
+          SectionCard {
+            visible: telemetry.hasData && !!pulzar.status && pulzar.status.interfaces.length > 0
+            theme: tones
+            title: pulzar.t.network
+            subheader: pulzar.t.networkSubtitle
+
+            Repeater {
+              model: pulzar.status ? pulzar.status.interfaces : []
+
+              Column {
+                required property var modelData
+                readonly property string share: Format.dropShare(modelData) || ""
+
+                width: parent.width
+                spacing: Style.space(2)
+
+                IconRow {
+                  theme: tones
+                  icon: pulzar.iconNetwork
+                  tone: "secondary"
+                  title: modelData.name
+                  // Wireless links and tunnels report no speed; the agent
+                  // sends -1 and the parser leaves the field out
+                  caption: modelData.linkMegabits !== undefined
+                    ? pulzar.t.linkSpeed(modelData.linkMegabits)
+                    : pulzar.t.noLinkSpeed
+                }
+
+                InfoRow {
+                  theme: tones
+                  label: pulzar.t.received
+                  value: Format.formatCounter(modelData.bytesReceived, pulzar.t)
+                }
+
+                InfoRow {
+                  theme: tones
+                  label: pulzar.t.sent
+                  value: Format.formatCounter(modelData.bytesSent, pulzar.t)
+                }
+
+                // A steady share of discarded arrivals is normal on a wired
+                // card, so the row appears when there is something to see and
+                // is left untinted rather than called a fault
+                InfoRow {
+                  visible: modelData.dropsIn > 0 && parent.share !== ""
+                  theme: tones
+                  label: pulzar.t.droppedPackets
+                  value: pulzar.t.shareOfPackets(parent.share)
+                }
+
+                InfoRow {
+                  visible: modelData.errorsIn > 0 || modelData.errorsOut > 0
+                  theme: tones
+                  label: pulzar.t.packetErrors
+                  value: modelData.errorsIn + " / " + modelData.errorsOut
+                }
+              }
             }
           }
 

@@ -305,6 +305,37 @@ function applySystem(hardware, metric) {
   hardware.battery = battery
 }
 
+// One entry per interface of the net input. `speed` is the link speed in
+// megabits, and -1 where the driver does not report one (wireless, tunnels).
+function applyInterface(status, metric) {
+  var name = metric.tags.interface
+
+  if (!name) return
+
+  var existing = status.interfaces.filter(function(one) { return one.name === name })[0]
+  if (existing && existing.collectedAtMs > metric.time) return
+
+  var link = integer(metric, "speed")
+  var entry = {
+    name: name,
+    collectedAtMs: metric.time,
+    collectedAt: isoTime(metric.time),
+    bytesReceived: unsigned(metric, "bytes_recv") || 0,
+    bytesSent: unsigned(metric, "bytes_sent") || 0,
+    packetsReceived: unsigned(metric, "packets_recv") || 0,
+    packetsSent: unsigned(metric, "packets_sent") || 0,
+    dropsIn: unsigned(metric, "drop_in") || 0,
+    dropsOut: unsigned(metric, "drop_out") || 0,
+    errorsIn: unsigned(metric, "err_in") || 0,
+    errorsOut: unsigned(metric, "err_out") || 0
+  }
+
+  if (link !== null && link >= 0) entry.linkMegabits = link
+
+  if (existing) status.interfaces[status.interfaces.indexOf(existing)] = entry
+  else status.interfaces.push(entry)
+}
+
 // Installed programs: an object of names and versions, or a list of names on
 // the platforms without versions
 function programs(encoded) {
@@ -376,6 +407,7 @@ function waiting(hostname) {
     observedAt: "",
     device: { name: hostname || "", serial: "" },
     hardware: { ramTotalBytes: 0, ramUsedBytes: 0, storageTotalBytes: 0, storageUsedBytes: 0 },
+    interfaces: [],
     inputs: []
   }
 }
@@ -407,6 +439,9 @@ function build(snapshot, hostname, now) {
         computerTime = metric.time
       }
       break
+    case "net":
+      applyInterface(status, metric)
+      break
     case "display":
       var count = integer(metric, "display.count")
       if (count !== null) status.hardware.displayCount = count
@@ -420,6 +455,8 @@ function build(snapshot, hostname, now) {
   }
 
   for (var name in latest) status.inputs.push({ measurement: name, collectedAt: isoTime(latest[name]) })
+
+  status.interfaces.sort(function(a, b) { return a.name < b.name ? -1 : (a.name > b.name ? 1 : 0) })
 
   status.inputs.sort(function(a, b) { return a.measurement < b.measurement ? -1 : (a.measurement > b.measurement ? 1 : 0) })
 
