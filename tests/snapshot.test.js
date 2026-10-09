@@ -122,3 +122,85 @@ test("classifies the battery condition", () => {
 
   for (const [ health, expected ] of Object.entries(cases)) assert.equal(Snapshot.batteryCondition(Number(health)), expected)
 })
+
+// A Super I/O chip answers for every channel it exposes, connected or not:
+// the idle TSI channels of an nct6793 all report 3892313.987, and the spare
+// SYSTIN/AUXTIN thermistor inputs float around a plausible hundred degrees.
+// Taken at face value they win the maximum and the panel shows a temperature
+// no component ever reached.
+const temperatures = sensors => Snapshot.parseSnapshot([
+  "systray_snapshot running=true,stale_after=1800i 1759230000000000000",
+  ...sensors.map(([sensor, value]) =>
+    `temp,host=SERIAL01,sensor=${ sensor } temp=${ value } 1759229400000000000`),
+].join("\n"))
+
+const highest = sensors =>
+  Snapshot.build(temperatures(sensors), "", snapshotTime).hardware.temperatureCelsius
+
+test("ignores the placeholder of an unconnected sensor", () => {
+  assert.equal(highest([
+    ["k10temp_tctl", 62.25],
+    ["nct6793_tsi0_temp", 69.625],
+    ["nct6793_tsi2_temp", 3892313.987],
+  ]), 69.625)
+})
+
+test("ignores the spare thermistor inputs of the Super I/O chip", () => {
+  assert.equal(highest([
+    ["k10temp_tctl", 62.25],
+    ["nct6793_systin", 113],
+    ["nct6793_auxtin1", 108],
+    ["nct6793_auxtin0", 48],
+  ]), 62.25)
+})
+
+test("keeps a sensor whose name merely contains a dropped one", () => {
+  assert.equal(highest([["auxtin_board", 70], ["systin_extra", 71]]), 71)
+})
+
+test("keeps a reading at the edge of the plausible range", () => {
+  assert.equal(highest([["coretemp_package_id_0", 150]]), 150)
+  assert.equal(highest([["ambient", -40]]), -40)
+})
+
+test("reports no temperature when every sensor is unusable", () => {
+  const status = Snapshot.build(temperatures([
+    ["nct6793_tsi2_temp", 3892313.987],
+    ["nct6793_systin", 113],
+  ]), "", snapshotTime)
+
+  assert.equal(status.hardware.temperatureCelsius, undefined)
+})
+
+// The agent tags every metric with the serial number it read from the DMI
+// tables, placeholder included.
+const serialOf = host => Snapshot.build(Snapshot.parseSnapshot([
+  "systray_snapshot running=true,stale_after=1800i 1759230000000000000",
+  `display,host=${ host } display.count=1i 1759229400000000000`,
+].join("\n")), "", snapshotTime).device.serial
+
+test("reports no serial number when the vendor left the DMI template", () => {
+  assert.equal(serialOf("To\\ Be\\ Filled\\ By\\ O.E.M."), "")
+  assert.equal(serialOf("Default\\ string"), "")
+  assert.equal(serialOf("System\\ Serial\\ Number"), "")
+  assert.equal(serialOf("Not\\ Specified"), "")
+})
+
+test("reports no serial number for a value that identifies nothing", () => {
+  assert.equal(Snapshot.identifier("N/A"), "")
+  assert.equal(Snapshot.identifier("n.a."), "")
+  assert.equal(Snapshot.identifier("00000000"), "")
+  assert.equal(Snapshot.identifier("xxxxxxxx"), "")
+  assert.equal(Snapshot.identifier("0123456789"), "")
+  assert.equal(Snapshot.identifier("...."), "")
+  assert.equal(Snapshot.identifier("   "), "")
+  assert.equal(Snapshot.identifier(undefined), "")
+})
+
+test("keeps a real serial number, trimmed", () => {
+  assert.equal(serialOf("SERIAL01"), "SERIAL01")
+  assert.equal(Snapshot.identifier("  C02XK1JPJG5H  "), "C02XK1JPJG5H")
+  // Only the whole value is a placeholder, never a part of one
+  assert.equal(Snapshot.identifier("OEM-4417-22"), "OEM-4417-22")
+  assert.equal(Snapshot.identifier("None-77A"), "None-77A")
+})
