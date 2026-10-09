@@ -36,6 +36,19 @@ Panel {
   readonly property var t: telemetry.t
   readonly property var status: telemetry.status
   readonly property var summary: Format.statusSummary(pulzar.status, telemetry.isError, pulzar.t)
+  // The languages for the header selector: the automatic choice first, wearing
+  // the flag of whatever it resolved to so the effect of "auto" is visible
+  readonly property var languageOptions: [{
+    value: "auto",
+    language: telemetry.systemLanguage,
+    // The code column holds short codes; "automatic" spelled out in any of the
+    // four languages would not fit beside EN, ES, CA and FR
+    code: "AUTO",
+    name: pulzar.t.languageAuto
+  }].concat(Locales.languageOptions.map(function(option) {
+    return { value: option.id, language: option.id, code: option.short, name: option.name }
+  }))
+
   // What the summary card used to spell out, now shown on hovering the light
   readonly property string summaryTooltip: [pulzar.summary.label, pulzar.summary.title, pulzar.summary.detail]
     .filter(function(line) { return !!line }).join("\n")
@@ -179,13 +192,27 @@ Panel {
               }
             }
             trailingControl: Component {
-              PanelActionButton {
-                radius: tones.radius
-                iconText: pulzar.iconRefresh
-                tooltipText: pulzar.t.refresh
-                foreground: tones.foreground
-                fontFamily: tones.fontFamily
-                onClicked: pulzar.refresh()
+              Row {
+                spacing: Style.space(6)
+
+                LanguagePicker {
+                  anchors.verticalCenter: parent.verticalCenter
+                  theme: tones
+                  options: pulzar.languageOptions
+                  value: telemetry.languageChoice
+                  tooltipText: pulzar.t.chooseLanguage
+                  onChanged: function(value) { telemetry.setLanguage(value) }
+                }
+
+                PanelActionButton {
+                  anchors.verticalCenter: parent.verticalCenter
+                  radius: tones.radius
+                  iconText: pulzar.iconRefresh
+                  tooltipText: pulzar.t.refresh
+                  foreground: tones.foreground
+                  fontFamily: tones.fontFamily
+                  onClicked: pulzar.refresh()
+                }
               }
             }
           }
@@ -482,7 +509,7 @@ Panel {
         }
       }
 
-      // ---------- Footer: support, language ----------
+      // ---------- Footer: support ----------
       Column {
         id: footer
         anchors.left: parent.left
@@ -531,18 +558,6 @@ Panel {
             font.family: tones.fontFamily
             font.pixelSize: Style.font.caption
           }
-        }
-
-        ButtonGroup {
-          anchors.horizontalCenter: parent.horizontalCenter
-          options: [{ value: "auto", label: pulzar.t.languageAuto, tooltip: pulzar.t.chooseLanguage }].concat(
-            Locales.languageOptions.map(function(option) { return { value: option.id, label: option.short, tooltip: option.name } }))
-          value: telemetry.languageChoice
-          foreground: tones.foreground
-          fontFamily: tones.fontFamily
-          fontSize: Style.font.caption
-          focusable: false
-          onChanged: function(value) { telemetry.setLanguage(value) }
         }
       }
     }
