@@ -138,7 +138,9 @@ function statusSummary(status, isError, t) {
 }
 
 // Plain text pasted in support requests
-function supportInformation(status, t) {
+// `encrypted` overrides what the agent reported, which on Linux never sees
+// LUKS; a support request is the last place to carry a wrong answer
+function supportInformation(status, t, encrypted) {
   var device = status.device
   var hardware = status.hardware
   var computer = status.computer
@@ -169,7 +171,7 @@ function supportInformation(status, t) {
     lines.push(
       "  " + t.installedMemory + ": " + formatBytes(computer.memoryBytes, t),
       "  " + t.storageCapacity + ": " + formatBytes(computer.storageBytes, t),
-      "  " + t.diskEncryption + ": " + encryptionAssessment(computer.encrypted, t).label,
+      "  " + t.diskEncryption + ": " + encryptionAssessment(encrypted !== undefined ? encrypted : computer.encrypted, t).label,
       "  " + t.manufacturingDate + ": " + (computer.manufacturingDate || t.unknown),
       "  " + t.agentVersion + ": " + (computer.agentVersion || t.unknown),
       "  " + t.programsLabel + ": " + computer.programs.length

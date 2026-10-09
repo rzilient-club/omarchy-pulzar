@@ -52,6 +52,42 @@ QtObject {
     saveLanguage.running = true
   }
 
+  // -------------------------------------------------------------- encryption
+
+  // The agent reports whether the system disk is encrypted, and on Linux it
+  // never finds out: its binary carries no notion of LUKS, dm-crypt or
+  // crypttab and answers false on every machine, encrypted or not. The panel
+  // asks the system instead — the device carrying / either is a dm-crypt
+  // mapping or it is not, which any user can read.
+  property bool diskEncrypted: false
+  property bool diskEncryptionKnown: false
+
+  function applyDiskEncryption(output) {
+    var answer = String(output || "").trim()
+
+    if (answer !== "encrypted" && answer !== "plain") {
+      root.diskEncryptionKnown = false
+      return
+    }
+
+    root.diskEncrypted = answer === "encrypted"
+    root.diskEncryptionKnown = true
+  }
+
+  property Process diskEncryptionProbe: Process {
+    running: true
+    // findmnt names the device behind /, with the btrfs subvolume stripped;
+    // lsblk types it, and only a dm-crypt mapping types as "crypt"
+    command: ["sh", "-c",
+      "source=$(findmnt -no SOURCE / 2>/dev/null | sed 's/\\[.*\\]//'); " +
+      "[ -n \"$source\" ] || { echo unknown; exit 0; }; " +
+      "[ \"$(lsblk -no TYPE \"$source\" 2>/dev/null | head -1)\" = crypt ] && echo encrypted || echo plain"]
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: root.applyDiskEncryption(text)
+    }
+  }
+
   // ------------------------------------------------------------------ reading
 
   function refresh() {

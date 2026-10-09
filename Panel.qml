@@ -35,6 +35,12 @@ Panel {
 
   readonly property var t: telemetry.t
   readonly property var status: telemetry.status
+  // The agent cannot see LUKS, so the probe in Telemetry decides whenever it
+  // has an answer and the reported flag is only a fallback
+  readonly property var encrypted: telemetry.diskEncryptionKnown
+    ? telemetry.diskEncrypted
+    : (pulzar.computer ? pulzar.computer.encrypted : undefined)
+
   readonly property var summary: Format.statusSummary(pulzar.status, telemetry.isError, pulzar.t)
   // The languages for the header selector: the automatic choice first, wearing
   // the flag of whatever it resolved to so the effect of "auto" is visible
@@ -61,7 +67,7 @@ Panel {
 
   function copySupport() {
     if (!telemetry.hasData) return
-    Quickshell.execDetached(["wl-copy", "--", Format.supportInformation(pulzar.status, pulzar.t)])
+    Quickshell.execDetached(["wl-copy", "--", Format.supportInformation(pulzar.status, pulzar.t, pulzar.encrypted)])
     pulzar.copied = true
     copiedTimer.restart()
   }
@@ -111,7 +117,7 @@ Panel {
     function toggle(): void { pulzar.toggle() }
     function refresh(): string { pulzar.refresh(); return "ok" }
     function status(): string { return pulzar.status ? pulzar.status.availability : "unknown" }
-    function support(): string { return pulzar.status ? Format.supportInformation(pulzar.status, pulzar.t) : "" }
+    function support(): string { return pulzar.status ? Format.supportInformation(pulzar.status, pulzar.t, pulzar.encrypted) : "" }
     function language(value: string): string { telemetry.setLanguage(value); return telemetry.languageChoice }
   }
 
@@ -403,7 +409,7 @@ Panel {
               InfoRow { theme: tones; label: pulzar.t.storageCapacity; value: pulzar.computer ? Format.formatBytes(pulzar.computer.storageBytes, pulzar.t) : "" }
 
               InfoRow {
-                readonly property var encryption: Format.encryptionAssessment(pulzar.computer ? pulzar.computer.encrypted : undefined, pulzar.t)
+                readonly property var encryption: Format.encryptionAssessment(pulzar.encrypted, pulzar.t)
                 theme: tones
                 label: pulzar.t.diskEncryption
                 value: encryption.label

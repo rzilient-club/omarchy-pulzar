@@ -60,3 +60,17 @@ test("builds the support information", () => {
   assert.match(text, /\nConnected displays: 2\n/)
   assert.match(text, /\nAgent status: Telemetry active\n/)
 })
+
+// The agent's Linux probe never finds LUKS and reports every machine as
+// unencrypted, so the panel verifies it and passes the answer through here.
+test("the support text prefers the verified encryption over the reported one", () => {
+  const line = verified => Format.supportInformation(status(), en, verified)
+    .split("\n").find(l => l.includes(en.diskEncryption))
+
+  // The fixture's agent reports an encrypted disk, so the override is only
+  // proven by the case that contradicts it
+  assert.match(line(false), /Disabled$/)
+  assert.match(line(true), /Enabled$/)
+  // Nothing verified: whatever the agent said stands
+  assert.match(line(undefined), /Enabled$/)
+})
