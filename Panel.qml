@@ -36,6 +36,9 @@ Panel {
   readonly property var t: telemetry.t
   readonly property var status: telemetry.status
   readonly property var summary: Format.statusSummary(pulzar.status, telemetry.isError, pulzar.t)
+  // What the summary card used to spell out, now shown on hovering the light
+  readonly property string summaryTooltip: [pulzar.summary.label, pulzar.summary.title, pulzar.summary.detail]
+    .filter(function(line) { return !!line }).join("\n")
   readonly property var battery: pulzar.status ? pulzar.status.hardware.battery : undefined
   readonly property var computer: pulzar.status ? pulzar.status.computer : undefined
 
@@ -169,11 +172,10 @@ Panel {
             foreground: tones.foreground
             fontFamily: tones.fontFamily
             iconComponent: Component {
-              Text {
-                text: pulzar.iconPulse
-                color: tones.tone(pulzar.summary.tone)
-                font.family: tones.fontFamily
-                font.pixelSize: Style.font.display
+              StatusDot {
+                theme: tones
+                tone: pulzar.summary.tone
+                tooltipText: pulzar.summaryTooltip
               }
             }
             trailingControl: Component {
@@ -183,55 +185,6 @@ Panel {
                 foreground: tones.foreground
                 fontFamily: tones.fontFamily
                 onClicked: pulzar.refresh()
-              }
-            }
-          }
-
-          // ---------- Summary ----------
-          Rectangle {
-            visible: !telemetry.isPending
-            width: parent.width
-            implicitHeight: summaryColumn.implicitHeight + Style.space(20)
-            radius: Style.cornerRadius
-            color: Util.alpha(tones.tone(pulzar.summary.tone), 0.12)
-            border.width: Math.max(1, Style.normalBorderWidth)
-            border.color: Util.alpha(tones.tone(pulzar.summary.tone), 0.4)
-
-            Column {
-              id: summaryColumn
-              anchors.fill: parent
-              anchors.margins: Style.space(10)
-              spacing: Style.space(3)
-
-              Text {
-                textFormat: Text.PlainText
-                width: parent.width
-                text: pulzar.summary.label
-                color: tones.tone(pulzar.summary.tone)
-                font.family: tones.fontFamily
-                font.pixelSize: Style.font.subtitle
-                font.bold: true
-              }
-
-              Text {
-                textFormat: Text.PlainText
-                width: parent.width
-                wrapMode: Text.WordWrap
-                text: pulzar.summary.title
-                color: tones.foreground
-                font.family: tones.fontFamily
-                font.pixelSize: Style.font.bodySmall
-                font.bold: true
-              }
-
-              Text {
-                textFormat: Text.PlainText
-                width: parent.width
-                wrapMode: Text.WordWrap
-                text: pulzar.summary.detail
-                color: tones.dim
-                font.family: tones.fontFamily
-                font.pixelSize: Style.font.caption
               }
             }
           }
