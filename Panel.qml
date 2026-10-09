@@ -29,6 +29,11 @@ Panel {
   readonly property string iconMonitor: "\u{F0379}"
   readonly property string iconSearch: "\u{F0349}"
   readonly property string iconAlert: "\u{F05D6}"
+  readonly property string iconLock: "\u{F033E}"
+
+  // Arch's own page on dm-crypt: the distribution this runs on, and the only
+  // instructions that cover converting a partition that is already in use
+  readonly property string encryptionGuideUrl: "https://wiki.archlinux.org/title/Dm-crypt/Device_encryption#Encrypt_an_existing_unencrypted_file_system"
 
   // Feedback of the copy button
   readonly property int copiedFeedbackMs: 2200
@@ -62,6 +67,7 @@ Panel {
   readonly property var computer: pulzar.status ? pulzar.status.computer : undefined
 
   property bool copied: false
+  property bool encryptionWarning: false
   property string programSearch: ""
   property string programQuery: ""
 
@@ -76,10 +82,20 @@ Panel {
     telemetry.refresh()
   }
 
+  // The button never encrypts anything: converting a mounted root is not
+  // something a panel can do, and the steps belong in front of the user
+  // before any of them is run
+  function openEncryptionGuide() {
+    pulzar.encryptionWarning = false
+    Quickshell.execDetached(["xdg-open", pulzar.encryptionGuideUrl])
+  }
+
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
 
   onOpenedChanged: if (opened) {
+    // A warning left standing from a previous visit must not greet the user
+    pulzar.encryptionWarning = false
     telemetry.refresh()
     if (panelFlick) panelFlick.contentY = 0
     Qt.callLater(function() { keyCatcher.forceActiveFocus() })
@@ -94,6 +110,19 @@ Panel {
   Theme {
     id: tones
     bar: pulzar.bar
+  }
+
+  Component {
+    id: lockButton
+
+    PanelActionButton {
+      radius: tones.radius
+      iconText: pulzar.iconLock
+      tooltipText: pulzar.t.encryptThisDisk
+      foreground: tones.foreground
+      fontFamily: tones.fontFamily
+      onClicked: pulzar.encryptionWarning = true
+    }
   }
 
   Timer {
@@ -152,12 +181,32 @@ Panel {
     contentWidth: panel.fittedContentWidth(Style.space(380))
     contentHeight: panel.fittedContentHeight(column.implicitHeight + footer.implicitHeight + Style.space(12), Style.space(760))
 
+    ConfirmDialog {
+      id: encryptionDialog
+      anchors.fill: parent
+      opened: pulzar.encryptionWarning
+      message: pulzar.t.encryptWarning
+      cancelText: pulzar.t.encryptCancel
+      confirmText: pulzar.t.encryptOpenGuide
+      cornerRadius: tones.radius
+      foreground: tones.foreground
+      fontFamily: tones.fontFamily
+      onCanceled: pulzar.encryptionWarning = false
+      onConfirmed: pulzar.openEncryptionGuide()
+    }
+
     PanelKeyCatcher {
       id: keyCatcher
       anchors.fill: parent
-      onCloseRequested: pulzar.close()
+      onCloseRequested: {
+        // Escape dismisses the warning first, the panel only once it is gone
+        if (pulzar.encryptionWarning) pulzar.encryptionWarning = false
+        else pulzar.close()
+      }
       onTabRequested: function(direction) { pulzar.switchPanel(direction) }
       onTextKey: function(key) {
+        // The shortcuts must not fire behind the warning
+        if (pulzar.encryptionWarning) return
         if (key === "r" || key === "R") pulzar.refresh()
         else if (key === "c" || key === "C") pulzar.copySupport()
         else if (key === "/") searchField.forceActiveFocus()
@@ -414,6 +463,9 @@ Panel {
                 label: pulzar.t.diskEncryption
                 value: encryption.label
                 tone: encryption.tone
+                // Offered only when the disk is known to be unencrypted, never
+                // on the "unknown" a failed probe leaves behind
+                trailing: pulzar.encrypted === false ? lockButton : null
               }
 
               InfoRow { theme: tones; label: pulzar.t.manufacturingDate; value: pulzar.computer ? (pulzar.computer.manufacturingDate || pulzar.t.unknown) : "" }
