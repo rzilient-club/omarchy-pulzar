@@ -9,7 +9,7 @@
 var SNAPSHOT_MEASUREMENT = "systray_snapshot"
 
 // Snapshot written by the agent on Linux
-var DEFAULT_PATH = "/var/lib/telegraf/systray/latest.lp"
+var DEFAULT_PATH = "/var/lib/siot-telemetry/systray/latest.lp"
 
 var AVAILABILITY_WAITING = "waiting"
 var AVAILABILITY_ACTIVE = "active"

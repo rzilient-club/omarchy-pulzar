@@ -20,7 +20,7 @@
     "allowMultiple": false,
     "defaultSection": "right",
     "defaults": {
-      "snapshotPath": "/var/lib/telegraf/systray/latest.lp",
+      "snapshotPath": "/var/lib/siot-telemetry/systray/latest.lp",
       "refreshIntervalSec": 5
     },
     "schema": [
@@ -28,7 +28,7 @@
         "key": "snapshotPath",
         "type": "path",
         "label": "Snapshot",
-        "defaultValue": "/var/lib/telegraf/systray/latest.lp",
+        "defaultValue": "/var/lib/siot-telemetry/systray/latest.lp",
         "description": "File written by the systray output of the agent."
       },
       {

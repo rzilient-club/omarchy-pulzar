@@ -64,13 +64,13 @@ Inline in the widget entry of `~/.config/omarchy/shell.json`:
 
 | Key | Default | |
 | --- | --- | --- |
-| `snapshotPath` | `/var/lib/telegraf/systray/latest.lp` | Snapshot written by the agent |
+| `snapshotPath` | `/var/lib/siot-telemetry/systray/latest.lp` | Snapshot written by the agent |
 | `refreshIntervalSec` | `5` | Poll interval. The file watch already catches every rewrite; the poll ages the data (stale) and finds a snapshot created later |
 
 ## How it works
 
 The agent's `systray` output writes the latest metric of every input to
-`/var/lib/telegraf/systray/latest.lp`, in the InfluxDB line protocol, after a
+`/var/lib/siot-telemetry/systray/latest.lp`, in the InfluxDB line protocol, after a
 `systray_snapshot` header line (`running`, `stale_after`). The plugin watches
 that file; it never collects anything itself and never reaches the network.
 
