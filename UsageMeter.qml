@@ -18,7 +18,7 @@ Rectangle {
   readonly property color toneColor: root.theme.tone(Format.usageTone(root.percent))
 
   implicitHeight: content.implicitHeight + Style.space(20)
-  radius: Style.cornerRadius
+  radius: root.theme.radius
   color: Util.alpha(root.theme.foreground, 0.05)
 
   Column {

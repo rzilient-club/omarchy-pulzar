@@ -13,7 +13,7 @@ Rectangle {
 
   implicitWidth: label.implicitWidth + Style.space(12)
   implicitHeight: label.implicitHeight + Style.space(4)
-  radius: Style.cornerRadius > 0 ? Math.min(Style.cornerRadius, height / 2) : 0
+  radius: root.theme.pill(height)
   color: Util.alpha(root.toneColor, 0.16)
   border.width: Math.max(1, Style.normalBorderWidth)
   border.color: Util.alpha(root.toneColor, 0.45)

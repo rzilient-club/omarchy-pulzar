@@ -25,7 +25,7 @@ Item {
     anchors.verticalCenter: parent.verticalCenter
     width: Style.space(34)
     height: width
-    radius: Style.cornerRadius
+    radius: root.theme.radius
     color: Util.alpha(root.toneColor, 0.16)
 
     Text {

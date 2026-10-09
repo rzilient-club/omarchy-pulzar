@@ -180,6 +180,7 @@ Panel {
             }
             trailingControl: Component {
               PanelActionButton {
+                radius: tones.radius
                 iconText: pulzar.iconRefresh
                 tooltipText: pulzar.t.refresh
                 foreground: tones.foreground
@@ -222,6 +223,7 @@ Panel {
             Button {
               visible: telemetry.isError
               anchors.horizontalCenter: parent.horizontalCenter
+              radius: tones.radius
               text: pulzar.t.retry
               iconText: pulzar.iconRefresh
               fontSize: Style.font.bodySmall
@@ -492,6 +494,7 @@ Panel {
 
         Button {
           width: parent.width
+          radius: tones.radius
           text: pulzar.copied ? pulzar.t.copied : pulzar.t.copySupport
           iconText: pulzar.copied ? pulzar.iconCopied : pulzar.iconCopy
           fontSize: Style.font.bodySmall
