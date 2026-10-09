@@ -30,6 +30,9 @@ Panel {
   readonly property string iconSearch: "\u{F0349}"
   readonly property string iconAlert: "\u{F05D6}"
   readonly property string iconLock: "\u{F033E}"
+  // A gauge, not a chip: the memory meter beside it already wears the chip
+  readonly property string iconProcessor: "\u{F04C5}"
+  readonly property string iconSwap: "\u{F04E1}"
 
   // Arch's own page on dm-crypt: the distribution this runs on, and the only
   // instructions that cover converting a partition that is already in use
@@ -339,28 +342,61 @@ Panel {
             theme: tones
             title: pulzar.t.usage
 
-            Row {
+            Grid {
+              id: meters
               width: parent.width
+              columns: 2
               spacing: Style.space(10)
 
+              readonly property real cellWidth: (meters.width - meters.spacing) / 2
+              readonly property var hardware: pulzar.status ? pulzar.status.hardware : null
+
               UsageMeter {
-                width: (parent.width - parent.spacing) / 2
+                width: meters.cellWidth
+                theme: tones
+                t: pulzar.t
+                label: pulzar.t.processor
+                icon: pulzar.iconProcessor
+                // The agent reports the percentage; there are no bytes here, so
+                // the two lines of the meter are given rather than derived
+                reportedPercent: meters.hardware && meters.hardware.cpuUsedPercent !== undefined
+                  ? meters.hardware.cpuUsedPercent : -1
+                valueText: meters.hardware && meters.hardware.cpuUsedPercent !== undefined
+                  ? Math.round(meters.hardware.cpuUsedPercent) + "%" : ""
+                totalText: meters.hardware && meters.hardware.cpuLoad
+                  ? pulzar.t.loadAverage + " " + meters.hardware.cpuLoad.map(Format.formatLoad).join(" · ") : ""
+              }
+
+              UsageMeter {
+                width: meters.cellWidth
                 theme: tones
                 t: pulzar.t
                 label: pulzar.t.memory
                 icon: pulzar.iconMemory
-                used: pulzar.status ? pulzar.status.hardware.ramUsedBytes : 0
-                total: pulzar.status ? pulzar.status.hardware.ramTotalBytes : 0
+                used: meters.hardware ? meters.hardware.ramUsedBytes : 0
+                total: meters.hardware ? meters.hardware.ramTotalBytes : 0
               }
 
               UsageMeter {
-                width: (parent.width - parent.spacing) / 2
+                width: meters.cellWidth
                 theme: tones
                 t: pulzar.t
                 label: pulzar.t.storage
                 icon: pulzar.iconStorage
-                used: pulzar.status ? pulzar.status.hardware.storageUsedBytes : 0
-                total: pulzar.status ? pulzar.status.hardware.storageTotalBytes : 0
+                used: meters.hardware ? meters.hardware.storageUsedBytes : 0
+                total: meters.hardware ? meters.hardware.storageTotalBytes : 0
+              }
+
+              UsageMeter {
+                // A machine without swap reports no total and gets no meter
+                visible: !!meters.hardware && !!meters.hardware.swapTotalBytes
+                width: meters.cellWidth
+                theme: tones
+                t: pulzar.t
+                label: pulzar.t.swap
+                icon: pulzar.iconSwap
+                used: meters.hardware ? (meters.hardware.swapUsedBytes || 0) : 0
+                total: meters.hardware ? (meters.hardware.swapTotalBytes || 0) : 0
               }
             }
           }

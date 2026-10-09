@@ -14,8 +14,20 @@ Rectangle {
   property real used: 0
   property real total: 0
 
-  readonly property int percent: Format.usagePercent(root.used, root.total)
-  readonly property color toneColor: root.theme.tone(Format.usageTone(root.percent))
+  // A meter that is not about bytes — the processor — brings its own
+  // percentage and its own two lines of text
+  property real reportedPercent: -1
+  property string valueText: ""
+  property string totalText: ""
+  // Some values carry no threshold worth colouring
+  property bool toned: true
+
+  readonly property int percent: root.reportedPercent >= 0
+    ? Math.min(100, Math.max(0, Math.round(root.reportedPercent)))
+    : Format.usagePercent(root.used, root.total)
+  readonly property color toneColor: root.toned
+    ? root.theme.tone(Format.usageTone(root.percent))
+    : root.theme.accent
 
   implicitHeight: content.implicitHeight + Style.space(20)
   radius: root.theme.radius
@@ -76,7 +88,7 @@ Rectangle {
         textFormat: Text.PlainText
         width: parent.width
         elide: Text.ElideRight
-        text: Format.formatBytes(root.used, root.t)
+        text: root.valueText !== "" ? root.valueText : Format.formatBytes(root.used, root.t)
         color: root.theme.foreground
         font.family: root.theme.fontFamily
         font.pixelSize: Style.font.subtitle
@@ -87,7 +99,7 @@ Rectangle {
         textFormat: Text.PlainText
         width: parent.width
         elide: Text.ElideRight
-        text: root.t.ofTotal(Format.formatBytes(root.total, root.t))
+        text: root.totalText !== "" ? root.totalText : root.t.ofTotal(Format.formatBytes(root.total, root.t))
         color: root.theme.dim
         font.family: root.theme.fontFamily
         font.pixelSize: Style.font.caption

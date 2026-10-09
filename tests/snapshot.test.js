@@ -204,3 +204,36 @@ test("keeps a real serial number, trimmed", () => {
   assert.equal(Snapshot.identifier("OEM-4417-22"), "OEM-4417-22")
   assert.equal(Snapshot.identifier("None-77A"), "None-77A")
 })
+
+// The snapshot carries the processor, the swap and a net measurement per
+// interface, none of which the panel used to read.
+const systemLine = fields => Snapshot.parseSnapshot([
+  "systray_snapshot running=true,stale_after=1800i 1759230000000000000",
+  `system,host=SERIAL01 ${ fields } 1759229400000000000`,
+].join("\n"))
+
+test("reads the processor usage and the load average", () => {
+  const hardware = Snapshot.build(systemLine(
+    "cpu.used_percent=6.35,cpu.load1=3.93,cpu.load5=2.41,cpu.load15=2.2"), "", snapshotTime).hardware
+
+  assert.equal(hardware.cpuUsedPercent, 6.35)
+  assert.deepEqual(hardware.cpuLoad, [3.93, 2.41, 2.2])
+})
+
+test("reads the swap", () => {
+  const hardware = Snapshot.build(systemLine(
+    "swap.total=58581368832u,swap.used=5003919360u"), "", snapshotTime).hardware
+
+  assert.equal(hardware.swapTotalBytes, 58581368832)
+  assert.equal(hardware.swapUsedBytes, 5003919360)
+})
+
+test("ignores a processor usage outside the percentage range", () => {
+  const hardware = Snapshot.build(systemLine("cpu.used_percent=135"), "", snapshotTime).hardware
+  assert.equal(hardware.cpuUsedPercent, undefined)
+})
+
+test("reports no load average when the agent sent none", () => {
+  const hardware = Snapshot.build(systemLine("ram.total=16u"), "", snapshotTime).hardware
+  assert.equal(hardware.cpuLoad, undefined)
+})

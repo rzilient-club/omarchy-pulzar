@@ -85,6 +85,11 @@ function encryptionAssessment(encrypted, t) {
   return encrypted ? { tone: "success", label: t.encryptionEnabled } : { tone: "error", label: t.encryptionDisabled }
 }
 
+// A load average reads as two decimals, the way uptime prints it
+function formatLoad(value) {
+  return (Math.round(value * 100) / 100).toFixed(2)
+}
+
 function usageTone(percent) {
   if (percent >= USAGE_ERROR_PERCENT) return "error"
   if (percent >= USAGE_WARNING_PERCENT) return "warning"
@@ -197,6 +202,7 @@ if (typeof module !== "undefined") {
     formatTemperature: formatTemperature,
     usagePercent: usagePercent,
     usageTone: usageTone,
+    formatLoad: formatLoad,
     formatDateTime: formatDateTime,
     formatTime: formatTime,
     inputName: inputName,

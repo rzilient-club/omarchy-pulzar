@@ -74,3 +74,9 @@ test("the support text prefers the verified encryption over the reported one", (
   // Nothing verified: whatever the agent said stands
   assert.match(line(undefined), /Enabled$/)
 })
+
+test("formats a load average to two decimals", () => {
+  assert.equal(Format.formatLoad(3.93), "3.93")
+  assert.equal(Format.formatLoad(2.2), "2.20")
+  assert.equal(Format.formatLoad(0), "0.00")
+})

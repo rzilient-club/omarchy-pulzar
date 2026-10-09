@@ -276,6 +276,17 @@ function applySystem(hardware, metric) {
   if ((value = unsigned(metric, "ram.used")) !== null) hardware.ramUsedBytes = value
   if ((value = unsigned(metric, "disk.total")) !== null) hardware.storageTotalBytes = value
   if ((value = unsigned(metric, "disk.used")) !== null) hardware.storageUsedBytes = value
+  if ((value = unsigned(metric, "swap.total")) !== null) hardware.swapTotalBytes = value
+  if ((value = unsigned(metric, "swap.used")) !== null) hardware.swapUsedBytes = value
+
+  // The agent already works the percentage out; taking it rather than dividing
+  // again keeps the panel saying what the platform was told
+  if ((value = percent(metric, "cpu.used_percent")) !== null) hardware.cpuUsedPercent = value
+
+  // A load average only means something next to the number of cores, which the
+  // snapshot does not carry, so it is reported and never given a tone
+  var load = [number(metric, "cpu.load1"), number(metric, "cpu.load5"), number(metric, "cpu.load15")]
+  if (load[0] !== null) hardware.cpuLoad = load.filter(function(one) { return one !== null })
 
   var charge = percent(metric, "batteries.0.current")
   var health = percent(metric, "batteries.0.health")
