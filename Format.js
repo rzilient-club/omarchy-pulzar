@@ -23,6 +23,14 @@ function formatBytes(value, t) {
   return decimal(value / Math.pow(1024, 3), 1, t) + " " + t.byteUnit
 }
 
+// A traffic counter starts at zero and stays there on an interface nothing has
+// used yet: unlike a total the agent never reported, that zero is an answer and
+// must not read as "unknown"
+function formatCounter(value, t) {
+  if (value === null || value === undefined) return t.unknown
+  return decimal(value / Math.pow(1024, 3), 1, t) + " " + t.byteUnit
+}
+
 function formatPercent(value, t) {
   if (value === null || value === undefined) return t.unknown
   return decimal(value, 0, t) + " %"
@@ -85,6 +93,21 @@ function encryptionAssessment(encrypted, t) {
   return encrypted ? { tone: "success", label: t.encryptionEnabled } : { tone: "error", label: t.encryptionDisabled }
 }
 
+// A load average reads as two decimals, the way uptime prints it
+function formatLoad(value) {
+  return (Math.round(value * 100) / 100).toFixed(2)
+}
+
+// Share of the arriving packets an interface threw away, as a string with two
+// decimals. Null when nothing has arrived, where a share would mean nothing.
+function dropShare(entry) {
+  var arrived = entry.packetsReceived + entry.dropsIn
+
+  if (!arrived) return null
+
+  return (Math.round((entry.dropsIn / arrived) * 10000) / 100).toFixed(2)
+}
+
 function usageTone(percent) {
   if (percent >= USAGE_ERROR_PERCENT) return "error"
   if (percent >= USAGE_WARNING_PERCENT) return "warning"
@@ -138,7 +161,9 @@ function statusSummary(status, isError, t) {
 }
 
 // Plain text pasted in support requests
-function supportInformation(status, t) {
+// `encrypted` overrides what the agent reported, which on Linux never sees
+// LUKS; a support request is the last place to carry a wrong answer
+function supportInformation(status, t, encrypted) {
   var device = status.device
   var hardware = status.hardware
   var computer = status.computer
@@ -169,7 +194,7 @@ function supportInformation(status, t) {
     lines.push(
       "  " + t.installedMemory + ": " + formatBytes(computer.memoryBytes, t),
       "  " + t.storageCapacity + ": " + formatBytes(computer.storageBytes, t),
-      "  " + t.diskEncryption + ": " + encryptionAssessment(computer.encrypted, t).label,
+      "  " + t.diskEncryption + ": " + encryptionAssessment(encrypted !== undefined ? encrypted : computer.encrypted, t).label,
       "  " + t.manufacturingDate + ": " + (computer.manufacturingDate || t.unknown),
       "  " + t.agentVersion + ": " + (computer.agentVersion || t.unknown),
       "  " + t.programsLabel + ": " + computer.programs.length
@@ -191,10 +216,13 @@ if (typeof module !== "undefined") {
     VISIBLE_PROGRAMS: VISIBLE_PROGRAMS,
     VISIBLE_SEARCH_RESULTS: VISIBLE_SEARCH_RESULTS,
     formatBytes: formatBytes,
+    formatCounter: formatCounter,
     formatPercent: formatPercent,
     formatTemperature: formatTemperature,
     usagePercent: usagePercent,
     usageTone: usageTone,
+    formatLoad: formatLoad,
+    dropShare: dropShare,
     formatDateTime: formatDateTime,
     formatTime: formatTime,
     inputName: inputName,

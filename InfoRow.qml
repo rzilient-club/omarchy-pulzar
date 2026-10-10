@@ -10,9 +10,14 @@ Item {
   property string label: ""
   property string value: ""
   property string tone: ""
+  // Optional control after the value — the row reserves the space itself
+  property Component trailing: null
+
+  readonly property real trailingInset: trailingLoader.item && trailingLoader.item.visible
+    ? trailingLoader.width + Style.space(8) : 0
 
   width: parent ? parent.width : implicitWidth
-  implicitHeight: Math.max(labelText.implicitHeight, valueItem.implicitHeight) + Style.space(4)
+  implicitHeight: Math.max(labelText.implicitHeight, valueItem.implicitHeight, trailingLoader.implicitHeight) + Style.space(4)
 
   Text {
     id: labelText
@@ -28,9 +33,17 @@ Item {
     font.pixelSize: Style.font.bodySmall
   }
 
+  Loader {
+    id: trailingLoader
+    sourceComponent: root.trailing
+    anchors.right: parent.right
+    anchors.verticalCenter: parent.verticalCenter
+  }
+
   Item {
     id: valueItem
     anchors.right: parent.right
+    anchors.rightMargin: root.trailingInset
     anchors.verticalCenter: parent.verticalCenter
     width: Math.min(root.tone !== "" ? chip.implicitWidth : valueText.implicitWidth, root.width * 0.62)
     implicitHeight: root.tone !== "" ? chip.implicitHeight : valueText.implicitHeight

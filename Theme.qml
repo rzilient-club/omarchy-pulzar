@@ -20,9 +20,31 @@ QtObject {
   // Named colors of colors.toml (green, yellow, red…)
   property var named: ({})
 
-  readonly property color success: root.pick("green", root.accent)
-  readonly property color warning: root.pick("yellow", root.pick("orange", root.accent))
-  readonly property color error: root.pick("red", root.urgent)
+  // Omarchy derives Style.cornerRadius from Hyprland's decoration:rounding,
+  // which is 2 here and reads as square corners. The panel carries its own
+  // rounding so its cards, chips, meters and buttons stay round whatever the
+  // window rounding is. Everything else still follows the theme.
+  property int radius: Style.space(8)
+
+  // A chip or a pill must not round past a half circle
+  function pill(height) {
+    return Math.min(root.radius, height / 2)
+  }
+
+  // Naming these is optional for a theme: Artemis defines only `accent`,
+  // `muted` and the ANSI slots, so success and warning both resolved to the
+  // accent and error to `urgent` — one pale blue for all three, which is how
+  // a running agent came to look switched off. A theme that names a colour
+  // still wins; a theme that names none falls back to the green, amber and
+  // red a status light is read by, rather than to a colour that signals
+  // nothing.
+  readonly property color defaultSuccess: "#3fb950"
+  readonly property color defaultWarning: "#e3b341"
+  readonly property color defaultError: "#f85149"
+
+  readonly property color success: root.pick("green", root.defaultSuccess)
+  readonly property color warning: root.pick("yellow", root.pick("orange", root.defaultWarning))
+  readonly property color error: root.pick("red", root.defaultError)
 
   function pick(name, fallback) {
     var value = root.named[name]

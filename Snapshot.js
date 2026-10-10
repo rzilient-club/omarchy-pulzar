@@ -166,6 +166,27 @@ function number(metric, key) {
   return value
 }
 
+// A sensor the board leaves unconnected still answers when asked. The Super
+// I/O chips return a placeholder far outside any real range (nct6793 gives
+// 3892313.987 on an idle TSI channel), and their spare thermistor inputs
+// float at a plausible-looking hundred degrees. Only a reading silicon can
+// actually reach is kept, and SYSTIN/AUXTIN are dropped by name: they are
+// unconnected on most boards, stay inside the valid range, and would win the
+// maximum with a number no component ever reached.
+var TEMPERATURE_MIN_CELSIUS = -40
+var TEMPERATURE_MAX_CELSIUS = 150
+var UNCONNECTED_SENSOR = /(?:^|_)(?:systin|auxtin[0-9]*)$/
+
+function usableTemperature(metric) {
+  var value = number(metric, "temp")
+
+  if (value === null) return null
+  if (value < TEMPERATURE_MIN_CELSIUS || value > TEMPERATURE_MAX_CELSIUS) return null
+  if (UNCONNECTED_SENSOR.test(metric.tags.sensor || "")) return null
+
+  return value
+}
+
 function percent(metric, key) {
   var value = number(metric, key)
   return value === null || value < 0 || value > 100 ? null : value
@@ -179,6 +200,54 @@ function integer(metric, key) {
 function unsigned(metric, key) {
   var value = number(metric, key)
   return value === null || value < 0 ? null : Math.floor(value)
+}
+
+// Vendors are meant to burn an identifier into the DMI tables and plenty of
+// them ship the template instead: this ASRock board answers "To Be Filled By
+// O.E.M." for its serial number, others leave "Default string", a row of
+// zeroes, or nothing but punctuation. The agent forwards whatever it reads,
+// so the placeholders are recognised here and reported as no value at all,
+// which lets the panel fall back to "Unknown serial number" instead of
+// presenting boilerplate as an identifier.
+var DMI_PLACEHOLDERS = [
+  "0123456789",
+  "base board serial number",
+  "board serial number",
+  "chassis serial number",
+  "default",
+  "default string",
+  "empty",
+  "filled by o e m",
+  "invalid",
+  "module serial number",
+  "n a",
+  "none",
+  "not applicable",
+  "not available",
+  "not specified",
+  "o e m",
+  "oem",
+  "system manufacturer",
+  "system product name",
+  "system serial number",
+  "system version",
+  "to be filled by o e m",
+  "unknown"
+]
+
+// Returns the value trimmed, or "" when it identifies nothing.
+function identifier(value) {
+  var trimmed = String(value === undefined || value === null ? "" : value).trim()
+  // Case and punctuation vary between vendors: "N/A", "n.a." and "N / A" are
+  // the same non-answer, so they are compared without either
+  var normalised = trimmed.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim()
+
+  if (!normalised) return ""
+  if (DMI_PLACEHOLDERS.indexOf(normalised) !== -1) return ""
+  // A single repeated character, "000000000" or "xxxxxxxx", names no device
+  if (/^(.)\1*$/.test(normalised.replace(/ /g, ""))) return ""
+
+  return trimmed
 }
 
 function text(metric, key) {
@@ -207,6 +276,17 @@ function applySystem(hardware, metric) {
   if ((value = unsigned(metric, "ram.used")) !== null) hardware.ramUsedBytes = value
   if ((value = unsigned(metric, "disk.total")) !== null) hardware.storageTotalBytes = value
   if ((value = unsigned(metric, "disk.used")) !== null) hardware.storageUsedBytes = value
+  if ((value = unsigned(metric, "swap.total")) !== null) hardware.swapTotalBytes = value
+  if ((value = unsigned(metric, "swap.used")) !== null) hardware.swapUsedBytes = value
+
+  // The agent already works the percentage out; taking it rather than dividing
+  // again keeps the panel saying what the platform was told
+  if ((value = percent(metric, "cpu.used_percent")) !== null) hardware.cpuUsedPercent = value
+
+  // A load average only means something next to the number of cores, which the
+  // snapshot does not carry, so it is reported and never given a tone
+  var load = [number(metric, "cpu.load1"), number(metric, "cpu.load5"), number(metric, "cpu.load15")]
+  if (load[0] !== null) hardware.cpuLoad = load.filter(function(one) { return one !== null })
 
   var charge = percent(metric, "batteries.0.current")
   var health = percent(metric, "batteries.0.health")
@@ -223,6 +303,37 @@ function applySystem(hardware, metric) {
   }
 
   hardware.battery = battery
+}
+
+// One entry per interface of the net input. `speed` is the link speed in
+// megabits, and -1 where the driver does not report one (wireless, tunnels).
+function applyInterface(status, metric) {
+  var name = metric.tags.interface
+
+  if (!name) return
+
+  var existing = status.interfaces.filter(function(one) { return one.name === name })[0]
+  if (existing && existing.collectedAtMs > metric.time) return
+
+  var link = integer(metric, "speed")
+  var entry = {
+    name: name,
+    collectedAtMs: metric.time,
+    collectedAt: isoTime(metric.time),
+    bytesReceived: unsigned(metric, "bytes_recv") || 0,
+    bytesSent: unsigned(metric, "bytes_sent") || 0,
+    packetsReceived: unsigned(metric, "packets_recv") || 0,
+    packetsSent: unsigned(metric, "packets_sent") || 0,
+    dropsIn: unsigned(metric, "drop_in") || 0,
+    dropsOut: unsigned(metric, "drop_out") || 0,
+    errorsIn: unsigned(metric, "err_in") || 0,
+    errorsOut: unsigned(metric, "err_out") || 0
+  }
+
+  if (link !== null && link >= 0) entry.linkMegabits = link
+
+  if (existing) status.interfaces[status.interfaces.indexOf(existing)] = entry
+  else status.interfaces.push(entry)
 }
 
 // Installed programs: an object of names and versions, or a list of names on
@@ -296,6 +407,7 @@ function waiting(hostname) {
     observedAt: "",
     device: { name: hostname || "", serial: "" },
     hardware: { ramTotalBytes: 0, ramUsedBytes: 0, storageTotalBytes: 0, storageUsedBytes: 0 },
+    interfaces: [],
     inputs: []
   }
 }
@@ -315,7 +427,7 @@ function build(snapshot, hostname, now) {
     if (metric.time > (latest[metric.name] || 0)) latest[metric.name] = metric.time
 
     // Every input tags its metrics with the serial number
-    if (metric.tags.host && !status.device.serial) status.device.serial = metric.tags.host
+    if (metric.tags.host && !status.device.serial) status.device.serial = identifier(metric.tags.host)
 
     switch (metric.name) {
     case "system":
@@ -327,19 +439,24 @@ function build(snapshot, hostname, now) {
         computerTime = metric.time
       }
       break
+    case "net":
+      applyInterface(status, metric)
+      break
     case "display":
       var count = integer(metric, "display.count")
       if (count !== null) status.hardware.displayCount = count
       break
     case "temp":
-      var temperature = number(metric, "temp")
-      if (temperature !== null && (status.hardware.temperatureCelsius === undefined || temperature > status.hardware.temperatureCelsius))
-        status.hardware.temperatureCelsius = temperature
+      var reading = usableTemperature(metric)
+      if (reading !== null && (status.hardware.temperatureCelsius === undefined || reading > status.hardware.temperatureCelsius))
+        status.hardware.temperatureCelsius = reading
       break
     }
   }
 
   for (var name in latest) status.inputs.push({ measurement: name, collectedAt: isoTime(latest[name]) })
+
+  status.interfaces.sort(function(a, b) { return a.name < b.name ? -1 : (a.name > b.name ? 1 : 0) })
 
   status.inputs.sort(function(a, b) { return a.measurement < b.measurement ? -1 : (a.measurement > b.measurement ? 1 : 0) })
 
@@ -359,6 +476,8 @@ if (typeof module !== "undefined") {
     parseLine: parseLine,
     parseSnapshot: parseSnapshot,
     batteryCondition: batteryCondition,
+    usableTemperature: usableTemperature,
+    identifier: identifier,
     waiting: waiting,
     build: build
   }

@@ -60,3 +60,38 @@ test("builds the support information", () => {
   assert.match(text, /\nConnected displays: 2\n/)
   assert.match(text, /\nAgent status: Telemetry active\n/)
 })
+
+// The agent's Linux probe never finds LUKS and reports every machine as
+// unencrypted, so the panel verifies it and passes the answer through here.
+test("the support text prefers the verified encryption over the reported one", () => {
+  const line = verified => Format.supportInformation(status(), en, verified)
+    .split("\n").find(l => l.includes(en.diskEncryption))
+
+  // The fixture's agent reports an encrypted disk, so the override is only
+  // proven by the case that contradicts it
+  assert.match(line(false), /Disabled$/)
+  assert.match(line(true), /Enabled$/)
+  // Nothing verified: whatever the agent said stands
+  assert.match(line(undefined), /Enabled$/)
+})
+
+test("formats a load average to two decimals", () => {
+  assert.equal(Format.formatLoad(3.93), "3.93")
+  assert.equal(Format.formatLoad(2.2), "2.20")
+  assert.equal(Format.formatLoad(0), "0.00")
+})
+
+// A total the agent never sent is unknown; a counter sitting at zero is not
+test("tells an unreported total apart from an idle counter", () => {
+  assert.equal(Format.formatBytes(0, en), en.unknown)
+  assert.equal(Format.formatCounter(0, en), "0.0 " + en.byteUnit)
+  assert.equal(Format.formatCounter(undefined, en), en.unknown)
+  assert.equal(Format.formatCounter(21685669533, en), Format.formatBytes(21685669533, en))
+})
+
+test("works out the share of arrivals an interface dropped", () => {
+  assert.equal(Format.dropShare({ packetsReceived: 21413572, dropsIn: 216807 }), "1.00")
+  assert.equal(Format.dropShare({ packetsReceived: 100, dropsIn: 0 }), "0.00")
+  // Nothing has arrived, so there is no share to state
+  assert.equal(Format.dropShare({ packetsReceived: 0, dropsIn: 0 }), null)
+})
