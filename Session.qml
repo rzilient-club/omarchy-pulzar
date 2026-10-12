@@ -12,15 +12,24 @@ import Quickshell.Io
 QtObject {
   id: root
 
+  // The shipped values live here and only here. A caller that wants to point an
+  // install somewhere else overrides the property; it must not pass an empty
+  // string to mean "use the default", because an empty string is a value and
+  // wins. Keeping a second copy in the caller is how these came to be blanked.
+  //
   // One application, registered once by rzilient, whose client_id ships inside every copy of this plugin.
   // Not a secret: it identifies the software, never the customer or the machine. PKCE is what makes each
   // individual authorization unforgeable. See docs/mcp/employee_device_panel.md in the backend.
-  property string clientId: "pEeZFwYxLM4lUsc24FWs7GTM1d9zF6K6u7A1KI4ZwDo"
-  property string issuer: "https://api.rzilient.tech"
+  readonly property string defaultClientId: "pEeZFwYxLM4lUsc24FWs7GTM1d9zF6K6u7A1KI4ZwDo"
+  readonly property string defaultIssuer: "https://api.rzilient.tech"
+  readonly property string defaultConsentOrigin: "https://join.rzilient.club"
+
+  property string clientId: root.defaultClientId
+  property string issuer: root.defaultIssuer
   // Where the person approves. The API answers /oauth/authorize with JSON for
   // the React consent card to consume, so a browser has to be sent to the
   // dashboard instead; the token exchange stays on the API above.
-  property string consentOrigin: "https://join.rzilient.club"
+  property string consentOrigin: root.defaultConsentOrigin
 
   property bool signedIn: false
   property bool expired: false
@@ -30,6 +39,10 @@ QtObject {
   property string failure: ""
   // The page the user has to approve in, while a sign-in is in flight
   property string consentUrl: ""
+  // Set when signing out removed the credential here but could not get the
+  // platform to retire it. Worth saying: the token stays usable until it
+  // expires, so "signed out" would otherwise be half true.
+  property string revokeFailed: ""
 
   readonly property bool configured: root.clientId !== ""
 
@@ -49,6 +62,7 @@ QtObject {
     root.busy = true
     root.failure = ""
     root.consentUrl = ""
+    root.revokeFailed = ""
 
     // The client id travels in the environment rather than the command line,
     // where every process on the machine could read it
@@ -84,6 +98,8 @@ QtObject {
       root.consentUrl = String(message.url || "")
       return
     }
+
+    if (message.revoke_failed) root.revokeFailed = String(message.revoke_failed)
 
     if (message.signed_in !== undefined) root.signedIn = !!message.signed_in
     else if (message.stage === "signed_in" || message.stage === "refreshed") root.signedIn = true

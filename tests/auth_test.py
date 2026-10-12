@@ -64,7 +64,26 @@ class Platform(http.server.BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_POST(self):
-        if urllib.parse.urlparse(self.path).path != "/oauth/token":
+        path = urllib.parse.urlparse(self.path).path
+
+        if path == "/oauth/revoke":
+            body = self.rfile.read(int(self.headers.get("Content-Length", 0))).decode()
+            form = {k: v[0] for k, v in urllib.parse.parse_qs(body).items()}
+            if "client_secret" in form:
+                Platform.faults.append("sent_client_secret_to_revoke")
+            if not form.get("client_id"):
+                Platform.faults.append("revoked_without_client_id")
+            # The token really dies here. RFC 7009 §2.2 wants 200 either way,
+            # so the status alone would prove nothing — the test asserts the
+            # token stops working, and this is what makes that true.
+            Platform.live.discard(form.get("token"))
+            Platform.spent.add(form.get("token"))
+            self.send_response(200)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+
+        if path != "/oauth/token":
             self.send_error(404)
             return
 
@@ -234,10 +253,61 @@ class Flow(unittest.TestCase):
 
     def test_logout_forgets_the_token(self):
         self.sign_in()
-        self.run_helper("logout")
-        _, lines = self.run_helper("status")
+        _, lines = self.run_helper("logout")
+        _, after = self.run_helper("status")
 
+        self.assertFalse(after[-1]["signed_in"])
+        self.assertTrue(lines[-1]["revoked"])
+        self.assertEqual(lines[-1]["revoke_failed"], "")
+
+    def test_logout_retires_the_token_on_the_platform(self):
+        """The file going away is not the point: the credential must stop working.
+
+        RFC 7009 has the endpoint answer 200 for a token it does not know, so a
+        green response proves nothing. This puts the revoked token back and
+        checks the platform now refuses it.
+        """
+        self.sign_in()
+        path = os.path.join(self.state, "rzilient-pulzar", "credentials.json")
+        with open(path) as f:
+            before = json.load(f)
+
+        self.run_helper("logout")
+
+        # Restore the credential someone could have kept a copy of
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w") as f:
+            json.dump(before, f)
+
+        _, lines = self.run_helper("refresh")
+
+        self.assertFalse(lines[-1]["ok"])
+        self.assertEqual(lines[-1]["reason"], "reauthorize_required")
+
+    def test_signing_out_succeeds_even_if_the_platform_cannot_be_reached(self):
+        """A person who clicks Sign out ends up signed out, network or not."""
+        self.sign_in()
+        self.server.shutdown()
+        self.server.server_close()
+
+        _, lines = self.run_helper("logout")
+        _, after = self.run_helper("status")
+
+        self.assertTrue(lines[-1]["ok"])
         self.assertFalse(lines[-1]["signed_in"])
+        self.assertFalse(lines[-1]["revoked"])
+        self.assertTrue(lines[-1]["revoke_failed"].startswith("unreachable"))
+        # Locally signed out regardless
+        self.assertFalse(after[-1]["signed_in"])
+        self.assertFalse(os.path.exists(
+            os.path.join(self.state, "rzilient-pulzar", "credentials.json")))
+
+    def test_signing_out_when_never_signed_in(self):
+        _, lines = self.run_helper("logout")
+
+        self.assertTrue(lines[-1]["ok"])
+        self.assertFalse(lines[-1]["signed_in"])
+        self.assertFalse(lines[-1]["revoked"])
 
     def test_a_code_under_the_wrong_state_is_refused(self):
         """A code arriving with someone else's state must not be exchanged."""

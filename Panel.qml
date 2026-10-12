@@ -113,10 +113,14 @@ Panel {
 
   Session {
     id: session
-    // Left empty until the platform registers the plugin as a public client;
-    // the footer says so rather than offering a button that cannot work
-    clientId: pulzar.setting("clientId", "")
-    issuer: pulzar.setting("issuer", "")
+    // A setting overrides the shipped value; no setting leaves the shipped
+    // value alone. Passing pulzar.setting(name, "") straight through would
+    // hand down an empty string on a fresh install, which is a value and wins,
+    // so the panel would report itself unconfigured with a client id sitting
+    // unused one file away. An install that points at staging sets all three.
+    clientId: pulzar.setting("clientId", "") || session.defaultClientId
+    issuer: pulzar.setting("issuer", "") || session.defaultIssuer
+    consentOrigin: pulzar.setting("consentOrigin", "") || session.defaultConsentOrigin
   }
 
   Theme {
@@ -730,10 +734,12 @@ Panel {
                 if (session.failure !== "") return pulzar.t.signInFailed(session.failure)
                 if (session.consentUrl !== "") return pulzar.t.awaitingConsent
                 if (session.signedIn && session.expired) return pulzar.t.sessionExpired
+                if (!session.signedIn && session.revokeFailed !== "") return pulzar.t.signOutNotRevoked
                 return session.signedIn ? pulzar.t.signedIn : pulzar.t.notSignedIn
               }
               color: {
                 if (session.failure !== "") return tones.error
+                if (!session.signedIn && session.revokeFailed !== "") return tones.warning
                 if (session.signedIn && !session.expired) return tones.success
                 return tones.foreground
               }

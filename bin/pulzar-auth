@@ -248,6 +248,36 @@ def post_form(url, fields, on_invalid_grant=None):
         fail("unreachable", str(error.reason))
 
 
+def revoke_token(issuer, client_id, token):
+    """Asks the platform to retire the token. Returns "" on success, else why not.
+
+    Never fails the command. Signing out has to end with the person signed out
+    locally whatever the network did, so this reports a problem rather than
+    aborting before the credentials are removed.
+
+    RFC 7009 §2.2 requires a 200 for a token the server does not recognise, so
+    a 200 here is not proof that anything was revoked — only that the request
+    was accepted. The test for this asserts the token stops working, not that
+    the call returned 200.
+    """
+    body = urllib.parse.urlencode({"token": token, "client_id": client_id}).encode()
+    request = urllib.request.Request(
+        issuer.rstrip("/") + "/oauth/revoke",
+        data=body,
+        method="POST",
+        headers={"Content-Type": "application/x-www-form-urlencoded",
+                 "Accept": "application/json"},
+    )
+
+    try:
+        with urllib.request.urlopen(request, timeout=HTTP_TIMEOUT):
+            return ""
+    except urllib.error.HTTPError as error:
+        return "revoke_%d" % error.code
+    except urllib.error.URLError as error:
+        return "unreachable: %s" % error.reason
+
+
 def store(tokens):
     """Persists the pair, and says plainly when it could not.
 
@@ -358,12 +388,34 @@ def status():
     )
 
 
-def logout():
+def logout(issuer, client_id):
+    """Retires the token on the platform, then forgets it here.
+
+    Deleting the file alone would leave a credential that keeps working: the
+    access token for up to two hours, and the refresh token until something
+    uses it. A copy in a backup, a synced directory, or an undelete would still
+    be live, so a sign-out that only unlinks tells the person something untrue.
+
+    An access token and its refresh token are one row in Doorkeeper, so
+    revoking the refresh token retires both in a single call.
+    """
+    current = load_credentials()
+    token = (current or {}).get("refresh_token")
+    problem = ""
+
+    if token and client_id:
+        problem = revoke_token(issuer, client_id, token)
+    elif token:
+        problem = "no_client_id"
+
+    # Unlinked whatever happened above: the person asked to be signed out
     try:
         os.unlink(CREDENTIALS)
     except FileNotFoundError:
         pass
-    emit(ok=True, signed_in=False)
+
+    emit(ok=True, signed_in=False, revoked=(bool(token) and problem == ""),
+         revoke_failed=problem)
 
 
 def main(argv):
@@ -383,7 +435,7 @@ def main(argv):
     elif command == "status":
         status()
     elif command == "logout":
-        logout()
+        logout(issuer, client_id)
     else:
         fail("unknown_command", command)
 
