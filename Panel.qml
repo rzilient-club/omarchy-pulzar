@@ -111,6 +111,14 @@ Panel {
     refreshIntervalSec: pulzar.setting("refreshIntervalSec", 5)
   }
 
+  Session {
+    id: session
+    // Left empty until the platform registers the plugin as a public client;
+    // the footer says so rather than offering a button that cannot work
+    clientId: pulzar.setting("clientId", "")
+    issuer: pulzar.setting("issuer", "")
+  }
+
   Theme {
     id: tones
     bar: pulzar.bar
@@ -688,6 +696,67 @@ Panel {
           enabled: telemetry.hasData
           opacity: enabled ? 1 : 0.45
           onClicked: pulzar.copySupport()
+        }
+
+        // ---------- Platform session ----------
+        Item {
+          width: parent.width
+          implicitHeight: Math.max(sessionLabel.implicitHeight, sessionButton.implicitHeight)
+
+          Column {
+            anchors.left: parent.left
+            anchors.right: sessionButton.left
+            anchors.rightMargin: Style.space(10)
+            anchors.verticalCenter: parent.verticalCenter
+            spacing: Style.space(1)
+
+            Text {
+              id: sessionLabel
+              textFormat: Text.PlainText
+              width: parent.width
+              elide: Text.ElideRight
+              text: pulzar.t.platformSession
+              color: tones.dim
+              font.family: tones.fontFamily
+              font.pixelSize: Style.font.caption
+            }
+
+            Text {
+              textFormat: Text.PlainText
+              width: parent.width
+              elide: Text.ElideRight
+              text: {
+                if (!session.configured) return pulzar.t.signInUnavailable
+                if (session.failure !== "") return pulzar.t.signInFailed(session.failure)
+                if (session.consentUrl !== "") return pulzar.t.awaitingConsent
+                if (session.signedIn && session.expired) return pulzar.t.sessionExpired
+                return session.signedIn ? pulzar.t.signedIn : pulzar.t.notSignedIn
+              }
+              color: {
+                if (session.failure !== "") return tones.error
+                if (session.signedIn && !session.expired) return tones.success
+                return tones.foreground
+              }
+              font.family: tones.fontFamily
+              font.pixelSize: Style.font.bodySmall
+              font.bold: true
+            }
+          }
+
+          Button {
+            id: sessionButton
+            anchors.right: parent.right
+            anchors.verticalCenter: parent.verticalCenter
+            radius: tones.radius
+            text: session.signedIn ? pulzar.t.signOut : pulzar.t.signIn
+            fontSize: Style.font.caption
+            foreground: tones.foreground
+            fontFamily: tones.fontFamily
+            bordered: true
+            enabled: session.configured && !session.busy
+            opacity: enabled ? 1 : 0.45
+            onClicked: session.signedIn ? session.signOut() : session.signIn()
+          }
         }
 
         Item {

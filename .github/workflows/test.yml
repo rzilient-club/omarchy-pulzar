@@ -24,6 +24,16 @@ jobs:
       - name: Test
         run: node --test tests/*.test.js
 
+      # The sign-in helper is Python, and its flow is worth running on every
+      # change: it talks to a stand-in platform, so it needs nothing reachable.
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Test the sign-in helper
+        run: python3 -W error::ResourceWarning tests/auth_test.py
+
       # The fields omarchy-shell checks before loading the plugin
       - name: Manifest
         run: |

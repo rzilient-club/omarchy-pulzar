@@ -1,0 +1,4 @@
+# Byte-cache left behind when the sign-in helper is imported or compiled —
+# the tests import it directly, so this appears from an ordinary test run
+__pycache__/
+*.pyc
