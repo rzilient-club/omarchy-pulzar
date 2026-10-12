@@ -1,0 +1,383 @@
+#!/usr/bin/env python3
+"""Signs the user in to the rzilient platform for the Pulzar panel.
+
+The panel cannot do this itself. Quickshell's Socket and SocketServer are
+Unix-domain only — they take a `path`, not a host and port — so QML has no way
+to serve the loopback redirect the authorization code comes back on, and no
+SHA-256 for the PKCE challenge either. This helper owns both, and the panel
+drives it with Process and reads a single line of JSON from stdout.
+
+The platform registers the plugin as a public client: there is no secret, so
+PKCE is what ties the code to the client that asked for it. The redirect goes
+to an ephemeral loopback port, which Doorkeeper accepts because RFC 8252 §7.3
+has it compare loopback URIs with the port removed.
+
+Nothing secret is ever printed: stdout carries status, never a token.
+"""
+
+import base64
+import errno
+import hashlib
+import http.server
+import json
+import os
+import secrets
+import socket
+import sys
+import threading
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+
+ISSUER = "https://api.rzilient.tech"
+SCOPE = "external_api"
+# The panel should not hang on a sign-in nobody is completing
+WAIT_SECONDS = 180
+HTTP_TIMEOUT = 30
+
+STATE_DIR = os.path.join(
+    os.environ.get("XDG_STATE_HOME") or os.path.join(os.path.expanduser("~"), ".local", "state"),
+    "rzilient-pulzar",
+)
+CREDENTIALS = os.path.join(STATE_DIR, "credentials.json")
+
+
+def emit(**fields):
+    """One line of JSON on stdout — the only thing the panel parses."""
+    sys.stdout.write(json.dumps(fields) + "\n")
+    sys.stdout.flush()
+
+
+def fail(reason, detail=""):
+    emit(ok=False, reason=reason, detail=detail)
+    sys.exit(1)
+
+
+# ----------------------------------------------------------------- storage
+
+def ensure_state_dir():
+    """Creates the directory 0700, refusing to follow a symlink into it.
+
+    os.makedirs would happily walk a symlink an attacker planted, so the final
+    component is created explicitly and then checked with lstat.
+    """
+    parent = os.path.dirname(STATE_DIR)
+    os.makedirs(parent, mode=0o700, exist_ok=True)
+
+    try:
+        os.mkdir(STATE_DIR, 0o700)
+    except FileExistsError:
+        pass
+
+    info = os.lstat(STATE_DIR)
+    if not os.path.isdir(STATE_DIR) or os.path.islink(STATE_DIR):
+        fail("state_dir_not_a_directory", STATE_DIR)
+    if info.st_uid != os.getuid():
+        fail("state_dir_not_owned_by_user", STATE_DIR)
+
+    # Tighten a directory left loose by an older version
+    if info.st_mode & 0o077:
+        os.chmod(STATE_DIR, 0o700)
+
+
+def save_credentials(payload):
+    """Writes 0600 through a fresh temp file, then renames over the target.
+
+    O_EXCL and O_NOFOLLOW mean the write cannot land on a symlink someone
+    planted between the check and the open, and the rename is atomic, so a
+    reader never sees a half-written file.
+    """
+    ensure_state_dir()
+    temporary = CREDENTIALS + ".new"
+
+    try:
+        os.unlink(temporary)
+    except FileNotFoundError:
+        pass
+
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
+    handle = os.open(temporary, flags, 0o600)
+    try:
+        with os.fdopen(handle, "w") as stream:
+            json.dump(payload, stream)
+            stream.flush()
+            os.fsync(stream.fileno())
+    except BaseException:
+        os.unlink(temporary)
+        raise
+
+    os.rename(temporary, CREDENTIALS)
+
+    # The rename leaves the directory entry unflushed; a crash here would lose
+    # a sign-in that already reported success
+    directory = os.open(STATE_DIR, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(directory)
+    finally:
+        os.close(directory)
+
+
+def load_credentials():
+    try:
+        handle = os.open(CREDENTIALS, os.O_RDONLY | os.O_NOFOLLOW)
+    except (FileNotFoundError, OSError) as error:
+        if isinstance(error, OSError) and error.errno not in (errno.ENOENT, errno.ELOOP):
+            raise
+        return None
+
+    with os.fdopen(handle) as stream:
+        try:
+            return json.load(stream)
+        except ValueError:
+            return None
+
+
+# -------------------------------------------------------------------- pkce
+
+def pkce_pair():
+    """A verifier and its S256 challenge, base64url with the padding dropped.
+
+    RFC 7636 §4.1 puts the verifier between 43 and 128 characters; 32 random
+    bytes encode to 43.
+    """
+    verifier = base64.urlsafe_b64encode(secrets.token_bytes(32)).decode().rstrip("=")
+    digest = hashlib.sha256(verifier.encode("ascii")).digest()
+    challenge = base64.urlsafe_b64encode(digest).decode().rstrip("=")
+    return verifier, challenge
+
+
+# --------------------------------------------------------------- listening
+
+class Redirect(http.server.BaseHTTPRequestHandler):
+    """Catches the one redirect and nothing else."""
+
+    result = None
+    expected_state = None
+
+    def do_GET(self):
+        parsed = urllib.parse.urlparse(self.path)
+
+        if parsed.path != "/callback":
+            self.send_error(404)
+            return
+
+        query = urllib.parse.parse_qs(parsed.query)
+        received_state = (query.get("state") or [""])[0]
+
+        # A code arriving under someone else's state is not ours to use
+        if not secrets.compare_digest(received_state, Redirect.expected_state or ""):
+            Redirect.result = {"error": "state_mismatch"}
+            self.respond("Sign-in could not be verified. You can close this tab.")
+            return
+
+        if "error" in query:
+            Redirect.result = {"error": (query.get("error") or [""])[0]}
+            self.respond("Sign-in was refused. You can close this tab.")
+            return
+
+        code = (query.get("code") or [""])[0]
+        if not code:
+            Redirect.result = {"error": "no_code"}
+            self.respond("Sign-in returned no code. You can close this tab.")
+            return
+
+        Redirect.result = {"code": code}
+        self.respond("Signed in. You can close this tab and go back to the panel.")
+
+    def respond(self, message):
+        body = ("<!doctype html><meta charset=utf-8>"
+                "<title>Pulzar</title>"
+                "<p style='font:16px system-ui;margin:3rem'>" + message + "</p>").encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *_args):
+        """Silence: the default handler prints the query, code included."""
+
+
+def listen():
+    """Binds an ephemeral port on the loopback interface only."""
+    server = http.server.HTTPServer(("127.0.0.1", 0), Redirect)
+    server.timeout = 1
+    return server, server.server_address[1]
+
+
+# ------------------------------------------------------------------ tokens
+
+def post_form(url, fields, on_invalid_grant=None):
+    body = urllib.parse.urlencode(fields).encode()
+    request = urllib.request.Request(
+        url,
+        data=body,
+        method="POST",
+        # enforce_content_type is on at the token endpoint
+        headers={"Content-Type": "application/x-www-form-urlencoded",
+                 "Accept": "application/json"},
+    )
+
+    try:
+        with urllib.request.urlopen(request, timeout=HTTP_TIMEOUT) as response:
+            return json.loads(response.read().decode())
+    except urllib.error.HTTPError as error:
+        detail = ""
+        try:
+            detail = json.loads(error.read().decode()).get("error", "")
+        except Exception:
+            pass
+        # A refresh token is spent the moment the access token issued beside it
+        # is used, and a spent one answers invalid_grant. Retrying cannot help:
+        # the user has to approve again.
+        if detail == "invalid_grant" and on_invalid_grant:
+            fail(on_invalid_grant, detail)
+        fail("token_endpoint_%d" % error.code, detail)
+    except urllib.error.URLError as error:
+        fail("unreachable", str(error.reason))
+
+
+def store(tokens):
+    """Persists the pair, and says plainly when it could not.
+
+    Rotation here is deferred: the refresh token just presented stays usable
+    until the new access token is used for something. Nothing uses it between
+    the exchange and this write, so a write that fails leaves the stored pair
+    intact and still valid — the caller can simply try again. That is worth
+    reporting as its own reason rather than as a traceback.
+    """
+    expires_in = tokens.get("expires_in")
+    payload = {
+        "access_token": tokens.get("access_token"),
+        "refresh_token": tokens.get("refresh_token"),
+        "scope": tokens.get("scope"),
+        "token_type": tokens.get("token_type"),
+        # Absolute, so the panel does not have to remember when it asked
+        "expires_at": int(time.time()) + int(expires_in) if expires_in else None,
+    }
+    try:
+        save_credentials(payload)
+    except OSError as error:
+        fail("cannot_store", "%s — the previous sign-in is still valid, try again" % error)
+
+    return payload
+
+
+# ---------------------------------------------------------------- commands
+
+def login(issuer, client_id, open_browser=True):
+    verifier, challenge = pkce_pair()
+    state = secrets.token_urlsafe(24)
+    Redirect.expected_state = state
+
+    try:
+        server, port = listen()
+    except OSError as error:
+        fail("cannot_listen", str(error))
+
+    redirect_uri = "http://127.0.0.1:%d/callback" % port
+    authorize = issuer.rstrip("/") + "/oauth/authorize?" + urllib.parse.urlencode({
+        "client_id": client_id,
+        "redirect_uri": redirect_uri,
+        "response_type": "code",
+        "scope": SCOPE,
+        "state": state,
+        "code_challenge": challenge,
+        "code_challenge_method": "S256",
+    })
+
+    emit(ok=True, stage="awaiting_consent", url=authorize, redirect_uri=redirect_uri)
+
+    if open_browser:
+        threading.Thread(
+            target=lambda: os.system("xdg-open %s >/dev/null 2>&1" % urllib.parse.quote(authorize, safe=":/?=&")),
+            daemon=True,
+        ).start()
+
+    deadline = time.time() + WAIT_SECONDS
+    while Redirect.result is None and time.time() < deadline:
+        server.handle_request()
+    server.server_close()
+
+    if Redirect.result is None:
+        fail("timed_out", "no redirect within %ds" % WAIT_SECONDS)
+    if "error" in Redirect.result:
+        fail(Redirect.result["error"])
+
+    tokens = post_form(issuer.rstrip("/") + "/oauth/token", {
+        "grant_type": "authorization_code",
+        "code": Redirect.result["code"],
+        "redirect_uri": redirect_uri,
+        "client_id": client_id,
+        "code_verifier": verifier,
+    })
+
+    stored = store(tokens)
+    emit(ok=True, stage="signed_in", expires_at=stored["expires_at"], scope=stored["scope"])
+
+
+def refresh(issuer, client_id):
+    current = load_credentials()
+    if not current or not current.get("refresh_token"):
+        fail("not_signed_in")
+
+    tokens = post_form(issuer.rstrip("/") + "/oauth/token", {
+        "grant_type": "refresh_token",
+        "refresh_token": current["refresh_token"],
+        "client_id": client_id,
+    }, on_invalid_grant="reauthorize_required")
+
+    stored = store(tokens)
+    emit(ok=True, stage="refreshed", expires_at=stored["expires_at"], scope=stored["scope"])
+
+
+def status():
+    current = load_credentials()
+    if not current or not current.get("access_token"):
+        emit(ok=True, signed_in=False)
+        return
+
+    expires_at = current.get("expires_at")
+    emit(
+        ok=True,
+        signed_in=True,
+        expires_at=expires_at,
+        expired=bool(expires_at and expires_at <= time.time()),
+        scope=current.get("scope"),
+    )
+
+
+def logout():
+    try:
+        os.unlink(CREDENTIALS)
+    except FileNotFoundError:
+        pass
+    emit(ok=True, signed_in=False)
+
+
+def main(argv):
+    command = argv[1] if len(argv) > 1 else "status"
+    issuer = os.environ.get("PULZAR_ISSUER", ISSUER)
+    client_id = os.environ.get("PULZAR_CLIENT_ID", "")
+
+    if command in ("login", "refresh") and not client_id:
+        fail("no_client_id", "set PULZAR_CLIENT_ID")
+
+    if command == "login":
+        login(issuer, client_id, open_browser=os.environ.get("PULZAR_NO_BROWSER") != "1")
+    elif command == "refresh":
+        refresh(issuer, client_id)
+    elif command == "status":
+        status()
+    elif command == "logout":
+        logout()
+    else:
+        fail("unknown_command", command)
+
+
+if __name__ == "__main__":
+    try:
+        main(sys.argv)
+    except KeyboardInterrupt:
+        fail("interrupted")
