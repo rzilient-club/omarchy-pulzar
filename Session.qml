@@ -17,6 +17,10 @@ QtObject {
   // individual authorization unforgeable. See docs/mcp/employee_device_panel.md in the backend.
   property string clientId: "pEeZFwYxLM4lUsc24FWs7GTM1d9zF6K6u7A1KI4ZwDo"
   property string issuer: "https://api.rzilient.tech"
+  // Where the person approves. The API answers /oauth/authorize with JSON for
+  // the React consent card to consume, so a browser has to be sent to the
+  // dashboard instead; the token exchange stays on the API above.
+  property string consentOrigin: "https://join.rzilient.club"
 
   property bool signedIn: false
   property bool expired: false
@@ -50,7 +54,8 @@ QtObject {
     // where every process on the machine could read it
     helperProcess.environment = ({
       PULZAR_CLIENT_ID: root.clientId,
-      PULZAR_ISSUER: root.issuer
+      PULZAR_ISSUER: root.issuer,
+      PULZAR_CONSENT_ORIGIN: root.consentOrigin
     })
     helperProcess.command = [root.helper].concat(commandArgs)
     helperProcess.running = true

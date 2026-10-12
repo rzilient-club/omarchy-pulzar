@@ -137,16 +137,27 @@ class Flow(unittest.TestCase):
         self.server = http.server.HTTPServer(("127.0.0.1", 0), Platform)
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
         self.issuer = "http://127.0.0.1:%d" % self.server.server_address[1]
+
+        # The consent card is served by the dashboard, not the API. Giving it
+        # its own port means a regression that merges the two is a failure
+        # here rather than something only production notices.
+        self.consent_server = http.server.HTTPServer(("127.0.0.1", 0), Platform)
+        threading.Thread(target=self.consent_server.serve_forever, daemon=True).start()
+        self.consent = "http://127.0.0.1:%d" % self.consent_server.server_address[1]
+
         self.state = tempfile.mkdtemp()
 
     def tearDown(self):
         self.server.shutdown()
         self.server.server_close()
+        self.consent_server.shutdown()
+        self.consent_server.server_close()
 
     def run_helper(self, command):
         environment = dict(os.environ,
                            XDG_STATE_HOME=self.state,
                            PULZAR_ISSUER=self.issuer,
+                           PULZAR_CONSENT_ORIGIN=self.consent,
                            PULZAR_CLIENT_ID=CLIENT_ID,
                            PULZAR_NO_BROWSER="1")
         finished = subprocess.run([sys.executable, HELPER, command],
@@ -163,6 +174,7 @@ class Flow(unittest.TestCase):
         environment = dict(os.environ,
                            XDG_STATE_HOME=self.state,
                            PULZAR_ISSUER=self.issuer,
+                           PULZAR_CONSENT_ORIGIN=self.consent,
                            PULZAR_CLIENT_ID=CLIENT_ID,
                            PULZAR_NO_BROWSER="1")
         process = subprocess.Popen([sys.executable, HELPER, "login"],
@@ -230,6 +242,7 @@ class Flow(unittest.TestCase):
     def test_a_code_under_the_wrong_state_is_refused(self):
         """A code arriving with someone else's state must not be exchanged."""
         environment = dict(os.environ, XDG_STATE_HOME=self.state, PULZAR_ISSUER=self.issuer,
+                           PULZAR_CONSENT_ORIGIN=self.consent,
                            PULZAR_CLIENT_ID=CLIENT_ID, PULZAR_NO_BROWSER="1")
         process = subprocess.Popen([sys.executable, HELPER, "login"],
                                    stdout=subprocess.PIPE, text=True, env=environment)
@@ -302,6 +315,24 @@ class Flow(unittest.TestCase):
         # It stops on the missing client id, not on a malformed empty issuer
         self.assertEqual(json.loads(finished.stdout)["reason"], "no_client_id")
         self.assertEqual(pulzar_auth.ISSUER, "https://api.rzilient.tech")
+
+    def test_consent_goes_to_the_dashboard_and_tokens_to_the_api(self):
+        """The two halves are different origins; collapsing them breaks sign-in.
+
+        The API answers /oauth/authorize with JSON for the React consent card,
+        so a browser sent there sees a payload rather than a consent screen.
+        """
+        first, rest = self.sign_in()
+
+        self.assertTrue(first["url"].startswith(self.consent + "/oauth/authorize"),
+                        "consent must go to the dashboard origin, got " + first["url"])
+        self.assertNotIn(self.issuer, first["url"])
+        # ...and the exchange still landed on the API
+        self.assertEqual(rest[-1]["stage"], "signed_in")
+
+    def test_an_unset_consent_origin_uses_the_dashboard_default(self):
+        self.assertEqual(pulzar_auth.CONSENT_ORIGIN, "https://join.rzilient.club")
+        self.assertNotEqual(pulzar_auth.CONSENT_ORIGIN, pulzar_auth.ISSUER)
 
     def test_the_pkce_pair_matches_the_rfc_vector(self):
         verifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"

@@ -30,7 +30,13 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+# One authorization server, two origins. The machine-facing half — the token
+# and refresh exchanges — is the API. The human-facing half is the dashboard:
+# the API answers /oauth/authorize with JSON, because a React consent card
+# drives it, so sending a browser there shows a payload instead of a consent
+# screen. The card lives at the dashboard origin, where the session is.
 ISSUER = "https://api.rzilient.tech"
+CONSENT_ORIGIN = "https://join.rzilient.club"
 # The application is a device_agent, whose only permitted scope is this one.
 # It is not a smaller external_api: a device_self token is refused by
 # /api/external/v1/* on purpose, because those controllers scope by tenant
@@ -270,7 +276,7 @@ def store(tokens):
 
 # ---------------------------------------------------------------- commands
 
-def login(issuer, client_id, open_browser=True):
+def login(issuer, client_id, consent_origin, open_browser=True):
     verifier, challenge = pkce_pair()
     state = secrets.token_urlsafe(24)
     Redirect.expected_state = state
@@ -281,7 +287,7 @@ def login(issuer, client_id, open_browser=True):
         fail("cannot_listen", str(error))
 
     redirect_uri = "http://127.0.0.1:%d/callback" % port
-    authorize = issuer.rstrip("/") + "/oauth/authorize?" + urllib.parse.urlencode({
+    authorize = consent_origin.rstrip("/") + "/oauth/authorize?" + urllib.parse.urlencode({
         "client_id": client_id,
         "redirect_uri": redirect_uri,
         "response_type": "code",
@@ -363,13 +369,15 @@ def logout():
 def main(argv):
     command = argv[1] if len(argv) > 1 else "status"
     issuer = os.environ.get("PULZAR_ISSUER") or ISSUER
+    consent_origin = os.environ.get("PULZAR_CONSENT_ORIGIN") or CONSENT_ORIGIN
     client_id = os.environ.get("PULZAR_CLIENT_ID") or ""
 
     if command in ("login", "refresh") and not client_id:
         fail("no_client_id", "set PULZAR_CLIENT_ID")
 
     if command == "login":
-        login(issuer, client_id, open_browser=os.environ.get("PULZAR_NO_BROWSER") != "1")
+        login(issuer, client_id, consent_origin,
+              open_browser=os.environ.get("PULZAR_NO_BROWSER") != "1")
     elif command == "refresh":
         refresh(issuer, client_id)
     elif command == "status":
