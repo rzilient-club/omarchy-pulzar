@@ -12,9 +12,11 @@ import Quickshell.Io
 QtObject {
   id: root
 
-  // Set once the platform registers the plugin as a public client
-  property string clientId: ""
-  property string issuer: ""
+  // One application, registered once by rzilient, whose client_id ships inside every copy of this plugin.
+  // Not a secret: it identifies the software, never the customer or the machine. PKCE is what makes each
+  // individual authorization unforgeable. See docs/mcp/employee_device_panel.md in the backend.
+  property string clientId: "pEeZFwYxLM4lUsc24FWs7GTM1d9zF6K6u7A1KI4ZwDo"
+  property string issuer: "https://api.rzilient.tech"
 
   property bool signedIn: false
   property bool expired: false

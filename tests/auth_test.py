@@ -191,7 +191,8 @@ class Flow(unittest.TestCase):
 
         self.assertEqual(query["code_challenge_method"], "S256")
         self.assertEqual(len(query["code_challenge"]), 43)
-        self.assertEqual(query["scope"], "external_api")
+        # device_agent applications may ask for this and nothing else
+        self.assertEqual(query["scope"], "device_self")
         self.assertEqual(query["response_type"], "code")
         self.assertNotIn("client_secret", query)
 
@@ -289,6 +290,18 @@ class Flow(unittest.TestCase):
         self.assertEqual(lines[-1]["reason"], "cannot_store")
         # The pair that was already on disk is untouched and still usable
         self.assertEqual(open(os.path.join(directory, "credentials.json")).read(), before)
+
+    def test_an_empty_issuer_falls_back_to_the_default(self):
+        """A QML property that was never configured arrives as an empty string,
+        which os.environ.get would hand straight through as the issuer."""
+        environment = dict(os.environ, XDG_STATE_HOME=self.state,
+                           PULZAR_ISSUER="", PULZAR_CLIENT_ID="")
+        finished = subprocess.run([sys.executable, HELPER, "login"],
+                                  capture_output=True, text=True, env=environment, timeout=30)
+
+        # It stops on the missing client id, not on a malformed empty issuer
+        self.assertEqual(json.loads(finished.stdout)["reason"], "no_client_id")
+        self.assertEqual(pulzar_auth.ISSUER, "https://api.rzilient.tech")
 
     def test_the_pkce_pair_matches_the_rfc_vector(self):
         verifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"

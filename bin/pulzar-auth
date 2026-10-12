@@ -31,7 +31,11 @@ import urllib.parse
 import urllib.request
 
 ISSUER = "https://api.rzilient.tech"
-SCOPE = "external_api"
+# The application is a device_agent, whose only permitted scope is this one.
+# It is not a smaller external_api: a device_self token is refused by
+# /api/external/v1/* on purpose, because those controllers scope by tenant
+# rather than by person.
+SCOPE = "device_self"
 # The panel should not hang on a sign-in nobody is completing
 WAIT_SECONDS = 180
 HTTP_TIMEOUT = 30
@@ -358,8 +362,8 @@ def logout():
 
 def main(argv):
     command = argv[1] if len(argv) > 1 else "status"
-    issuer = os.environ.get("PULZAR_ISSUER", ISSUER)
-    client_id = os.environ.get("PULZAR_CLIENT_ID", "")
+    issuer = os.environ.get("PULZAR_ISSUER") or ISSUER
+    client_id = os.environ.get("PULZAR_CLIENT_ID") or ""
 
     if command in ("login", "refresh") and not client_id:
         fail("no_client_id", "set PULZAR_CLIENT_ID")
