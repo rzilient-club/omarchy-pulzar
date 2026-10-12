@@ -1,6 +1,7 @@
 import QtQuick
 import Quickshell
 import Quickshell.Io
+import "Config.js" as Config
 
 // The platform sign-in behind the panel.
 //
@@ -12,17 +13,15 @@ import Quickshell.Io
 QtObject {
   id: root
 
-  // The shipped values live here and only here. A caller that wants to point an
-  // install somewhere else overrides the property; it must not pass an empty
-  // string to mean "use the default", because an empty string is a value and
-  // wins. Keeping a second copy in the caller is how these came to be blanked.
-  //
-  // One application, registered once by rzilient, whose client_id ships inside every copy of this plugin.
-  // Not a secret: it identifies the software, never the customer or the machine. PKCE is what makes each
-  // individual authorization unforgeable. See docs/mcp/employee_device_panel.md in the backend.
-  readonly property string defaultClientId: "pEeZFwYxLM4lUsc24FWs7GTM1d9zF6K6u7A1KI4ZwDo"
-  readonly property string defaultIssuer: "https://api.rzilient.tech"
-  readonly property string defaultConsentOrigin: "https://join.rzilient.club"
+  // The shipped values come from Config.js, which Node can read too, so the
+  // test that they are present and non-empty is structural rather than a
+  // regex over this file. A caller pointing an install elsewhere overrides the
+  // property; it must not pass an empty string to mean "use the default",
+  // because an empty string is a value and wins — that is what blanked these
+  // once already.
+  readonly property string defaultClientId: Config.CLIENT_ID
+  readonly property string defaultIssuer: Config.ISSUER
+  readonly property string defaultConsentOrigin: Config.CONSENT_ORIGIN
 
   property string clientId: root.defaultClientId
   property string issuer: root.defaultIssuer

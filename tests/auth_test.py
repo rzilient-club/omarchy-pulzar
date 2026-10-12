@@ -17,6 +17,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import unittest
 import urllib.parse
 import urllib.request
@@ -39,6 +40,7 @@ class Platform(http.server.BaseHTTPRequestHandler):
     faults = []
     live = set()
     spent = set()
+    revoke_stalls = False
 
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
@@ -67,6 +69,12 @@ class Platform(http.server.BaseHTTPRequestHandler):
         path = urllib.parse.urlparse(self.path).path
 
         if path == "/oauth/revoke":
+            # Stands in for an endpoint that drops packets rather than
+            # refusing. Interruptible, so teardown does not wait it out.
+            waited = 0.0
+            while Platform.revoke_stalls and waited < 30:
+                time.sleep(0.05)
+                waited += 0.05
             body = self.rfile.read(int(self.headers.get("Content-Length", 0))).decode()
             form = {k: v[0] for k, v in urllib.parse.parse_qs(body).items()}
             if "client_secret" in form:
@@ -153,6 +161,7 @@ class Flow(unittest.TestCase):
     def setUp(self):
         Platform.issued, Platform.faults = {}, []
         Platform.live, Platform.spent = set(), set()
+        Platform.revoke_stalls = False
         self.server = http.server.HTTPServer(("127.0.0.1", 0), Platform)
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
         self.issuer = "http://127.0.0.1:%d" % self.server.server_address[1]
@@ -167,6 +176,7 @@ class Flow(unittest.TestCase):
         self.state = tempfile.mkdtemp()
 
     def tearDown(self):
+        Platform.revoke_stalls = False
         self.server.shutdown()
         self.server.server_close()
         self.consent_server.shutdown()
@@ -301,6 +311,36 @@ class Flow(unittest.TestCase):
         self.assertFalse(after[-1]["signed_in"])
         self.assertFalse(os.path.exists(
             os.path.join(self.state, "rzilient-pulzar", "credentials.json")))
+
+    def test_a_sign_out_killed_mid_revoke_still_signs_out(self):
+        """The local half must not depend on the network half finishing.
+
+        Revocation is synchronous with a thirty second timeout, and an endpoint
+        that drops packets will sit there for all of it. If the helper is killed
+        during that wait — panel closing, session ending, someone giving up —
+        the person must still be signed out here. With the unlink last, they
+        were not.
+        """
+        self.sign_in()
+        path = os.path.join(self.state, "rzilient-pulzar", "credentials.json")
+        self.assertTrue(os.path.exists(path))
+
+        Platform.revoke_stalls = True
+        environment = dict(os.environ, XDG_STATE_HOME=self.state, PULZAR_ISSUER=self.issuer,
+                           PULZAR_CONSENT_ORIGIN=self.consent,
+                           PULZAR_CLIENT_ID=CLIENT_ID, PULZAR_NO_BROWSER="1")
+        process = subprocess.Popen([sys.executable, HELPER, "logout"],
+                                   stdout=subprocess.DEVNULL, env=environment)
+        try:
+            # Long enough to be inside the stalled revocation, far short of its timeout
+            time.sleep(2)
+            self.assertIsNone(process.poll(), "the revoke should still be hanging")
+            process.kill()
+        finally:
+            process.wait(timeout=10)
+
+        self.assertFalse(os.path.exists(path),
+                         "killed mid-revoke and still holding credentials")
 
     def test_signing_out_when_never_signed_in(self):
         _, lines = self.run_helper("logout")
