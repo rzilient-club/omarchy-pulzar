@@ -389,7 +389,7 @@ def status():
 
 
 def logout(issuer, client_id):
-    """Retires the token on the platform, then forgets it here.
+    """Forgets the token here, then retires it on the platform.
 
     Deleting the file alone would leave a credential that keeps working: the
     access token for up to two hours, and the refresh token until something
@@ -398,21 +398,30 @@ def logout(issuer, client_id):
 
     An access token and its refresh token are one row in Doorkeeper, so
     revoking the refresh token retires both in a single call.
+
+    The local half happens first, and that ordering is the point. Revocation is
+    a synchronous request with a thirty second timeout, and an endpoint that
+    drops packets rather than refusing them will sit there for all of it. If
+    the helper is killed during that wait — the panel closing, a session
+    ending, someone giving up — then with the unlink last the credentials file
+    survives and the person was never signed out at all, which is the one
+    outcome a sign-out must never produce. The token is read into memory first,
+    so the revocation still has what it needs after the file is gone.
     """
     current = load_credentials()
     token = (current or {}).get("refresh_token")
+
+    try:
+        os.unlink(CREDENTIALS)
+    except FileNotFoundError:
+        pass
+
     problem = ""
 
     if token and client_id:
         problem = revoke_token(issuer, client_id, token)
     elif token:
         problem = "no_client_id"
-
-    # Unlinked whatever happened above: the person asked to be signed out
-    try:
-        os.unlink(CREDENTIALS)
-    except FileNotFoundError:
-        pass
 
     emit(ok=True, signed_in=False, revoked=(bool(token) and problem == ""),
          revoke_failed=problem)
