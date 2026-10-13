@@ -67,3 +67,31 @@ test("the helper's own defaults agree with the shipped ones", () => {
     assert.equal(found[1], expected, `${ constant } has drifted from Config.js`)
   }
 })
+
+// Two of the fields behind the platform tab are live round trips to an MDM
+// vendor, so it must be fetched when the person opens that tab — never on a
+// timer and never when the panel opens, which has to stay instant.
+test("the platform lookup happens only on request", () => {
+  const callers = panel.split("\n")
+    .map((line, index) => [index + 1, line])
+    .filter(([, line]) => line.includes("lookUpDevice") || line.includes("refreshDevice"))
+
+  assert.ok(callers.length > 0, "nothing fetches the platform record at all")
+
+  for (const [number, line] of callers) {
+    // Each call site must sit inside openPlatformTab or a refresh handler,
+    // both of which are the person asking
+    const before = panel.split("\n").slice(0, number).reverse()
+    const scope = before.find(l => /function \w+\(|onClicked:|onChanged:|onTriggered:/.test(l)) || ""
+    assert.ok(/openPlatformTab|onClicked|refreshDevice/.test(scope),
+      `lookUpDevice at line ${ number } is reached from ${ scope.trim() || "nothing identifiable" }`)
+  }
+})
+
+test("nothing puts the platform lookup on a timer", () => {
+  const timers = panel.match(/Timer\s*\{[^}]*\}/g) || []
+  for (const timer of timers) {
+    assert.ok(!/lookUpDevice|refreshDevice/.test(timer),
+      "a Timer fetches the platform record: " + timer.replace(/\s+/g, " ").slice(0, 80))
+  }
+})
