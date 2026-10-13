@@ -78,6 +78,7 @@ Panel {
   readonly property var computer: pulzar.status ? pulzar.status.computer : undefined
 
   property bool copied: false
+  property bool linkCopied: false
   property bool encryptionWarning: false
   property string programSearch: ""
   property string programQuery: ""
@@ -87,6 +88,13 @@ Panel {
     Quickshell.execDetached(["wl-copy", "--", Format.supportInformation(pulzar.status, pulzar.t, pulzar.encrypted)])
     pulzar.copied = true
     copiedTimer.restart()
+  }
+
+  function copySignInLink() {
+    if (session.consentUrl === "") return
+    Quickshell.execDetached(["wl-copy", "--", session.consentUrl])
+    pulzar.linkCopied = true
+    linkCopiedTimer.restart()
   }
 
   function refresh() {
@@ -155,6 +163,12 @@ Panel {
       fontFamily: tones.fontFamily
       onClicked: pulzar.encryptionWarning = true
     }
+  }
+
+  Timer {
+    id: linkCopiedTimer
+    interval: pulzar.copiedFeedbackMs
+    onTriggered: pulzar.linkCopied = false
   }
 
   Timer {
@@ -824,7 +838,7 @@ Panel {
 
           Column {
             anchors.left: parent.left
-            anchors.right: sessionButton.left
+            anchors.right: copyLinkButton.visible ? copyLinkButton.left : sessionButton.left
             anchors.rightMargin: Style.space(10)
             anchors.verticalCenter: parent.verticalCenter
             spacing: Style.space(1)
@@ -863,6 +877,27 @@ Panel {
               font.pixelSize: Style.font.bodySmall
               font.bold: true
             }
+          }
+
+          // Telling someone to open a page while showing them no way to reach
+          // it is worse than saying nothing. This appears only when the helper
+          // could not launch a browser, which is the one case where the URL is
+          // theirs to open.
+          Button {
+            id: copyLinkButton
+            visible: session.consentUrl !== "" && !session.consentOpened
+            anchors.right: sessionButton.left
+            anchors.rightMargin: Style.space(6)
+            anchors.verticalCenter: parent.verticalCenter
+            radius: tones.radius
+            text: pulzar.linkCopied ? pulzar.t.signInLinkCopied : pulzar.t.copySignInLink
+            iconText: pulzar.linkCopied ? pulzar.iconCopied : pulzar.iconCopy
+            fontSize: Style.font.caption
+            foreground: pulzar.linkCopied ? tones.success : tones.foreground
+            fontFamily: tones.fontFamily
+            bordered: true
+            selected: pulzar.linkCopied
+            onClicked: pulzar.copySignInLink()
           }
 
           Button {
