@@ -78,6 +78,16 @@ Panel {
   readonly property var computer: pulzar.status ? pulzar.status.computer : undefined
 
   property bool copied: false
+  // "local" shows what the agent measured, "platform" what only rzilient
+  // knows. The platform tab costs a round trip to an MDM vendor, so it is
+  // fetched when it is opened rather than when the panel is.
+  property string tab: "local"
+
+  function openPlatformTab() {
+    pulzar.tab = "platform"
+    if (session.signedIn && !session.deviceLooked && !session.busy)
+      session.lookUpDevice(pulzar.platformSerial)
+  }
   property bool linkCopied: false
   property bool encryptionWarning: false
   property string programSearch: ""
@@ -126,15 +136,6 @@ Panel {
     refreshIntervalSec: pulzar.setting("refreshIntervalSec", 5)
   }
 
-  Connections {
-    target: session
-    function onChanged() {
-      // One lookup per sign-in: the record only changes when the session does
-      if (session.signedIn && !session.deviceLooked && !session.busy)
-        session.lookUpDevice(pulzar.platformSerial)
-    }
-  }
-
   Session {
     id: session
     // A setting overrides the shipped value; no setting leaves the shipped
@@ -145,6 +146,13 @@ Panel {
     clientId: pulzar.setting("clientId", "") || session.defaultClientId
     issuer: pulzar.setting("issuer", "") || session.defaultIssuer
     consentOrigin: pulzar.setting("consentOrigin", "") || session.defaultConsentOrigin
+  }
+
+  Dashboard {
+    id: dash
+    tenant: session.deviceRecord && session.deviceRecord.theme
+      ? session.deviceRecord.theme : null
+    fallbackFamily: tones.fontFamily
   }
 
   Theme {
@@ -258,11 +266,111 @@ Panel {
         else if (key === "/") searchField.forceActiveFocus()
       }
 
-      Flickable {
-        id: panelFlick
+      // ---------- Header ----------
+      PanelHero {
+        id: hero
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.top: parent.top
+        title: "Pulzar"
+        meta: pulzar.t.productSubtitle
+        foreground: tones.foreground
+        fontFamily: tones.fontFamily
+        iconComponent: Component {
+          StatusDot {
+            theme: tones
+            tone: pulzar.summary.tone
+            tooltipText: pulzar.summaryTooltip
+          }
+        }
+        trailingControl: Component {
+          Row {
+            spacing: Style.space(6)
+
+            LanguagePicker {
+              anchors.verticalCenter: parent.verticalCenter
+              theme: tones
+              options: pulzar.languageOptions
+              value: telemetry.languageChoice
+              tooltipText: pulzar.t.chooseLanguage
+              onChanged: function(value) { telemetry.setLanguage(value) }
+            }
+
+            PanelActionButton {
+              anchors.verticalCenter: parent.verticalCenter
+              radius: tones.radius
+              iconText: pulzar.iconRefresh
+              tooltipText: pulzar.t.refresh
+              foreground: tones.foreground
+              fontFamily: tones.fontFamily
+              onClicked: pulzar.refresh()
+            }
+          }
+        }
+      }
+
+      // ---------- Tabs ----------
+      // The local tab is instant because it reads a file the agent already
+      // wrote. The platform tab is not, so it is a tab rather than another
+      // section: opening it is the person asking for it.
+      ButtonGroup {
+        id: tabs
+        anchors.left: parent.left
+        anchors.top: hero.bottom
+        anchors.topMargin: Style.space(12)
+        options: [
+          { value: "local", label: pulzar.t.tabLocal },
+          { value: "platform", label: pulzar.t.tabPlatform }
+        ]
+        value: pulzar.tab
+        foreground: tones.foreground
+        fontFamily: tones.fontFamily
+        fontSize: Style.font.caption
+        focusable: false
+        onChanged: function(value) {
+          if (value === "platform") pulzar.openPlatformTab()
+          else pulzar.tab = value
+        }
+      }
+
+      PanelActionButton {
+        id: platformRefresh
+        visible: pulzar.tab === "platform" && session.signedIn
+        anchors.right: parent.right
+        anchors.verticalCenter: tabs.verticalCenter
+        radius: tones.radius
+        iconText: pulzar.iconRefresh
+        tooltipText: pulzar.t.refresh
+        foreground: tones.foreground
+        fontFamily: tones.fontFamily
+        enabled: !session.busy
+        opacity: enabled ? 1 : 0.45
+        onClicked: session.refreshDevice(pulzar.platformSerial)
+      }
+
+      PlatformTab {
+        visible: pulzar.tab === "platform"
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.top: tabs.bottom
+        anchors.topMargin: Style.space(14)
+        anchors.bottom: footer.top
+        anchors.bottomMargin: Style.space(12)
+        dash: dash
+        t: pulzar.t
+        record: session.deviceRecord
+        message: session.deviceMessage
+        signedIn: session.signedIn
+        loading: session.busy
+      }
+
+      Flickable {
+        id: panelFlick
+        visible: pulzar.tab === "local"
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.top: tabs.bottom
+        anchors.topMargin: Style.space(14)
         anchors.bottom: footer.top
         anchors.bottomMargin: Style.space(12)
         contentWidth: width
@@ -278,45 +386,6 @@ Panel {
           width: panelFlick.width - (panelFlick.interactive ? Style.space(8) : 0)
           spacing: Style.space(14)
 
-          // ---------- Header ----------
-          PanelHero {
-            width: parent.width
-            title: "Pulzar"
-            meta: pulzar.t.productSubtitle
-            foreground: tones.foreground
-            fontFamily: tones.fontFamily
-            iconComponent: Component {
-              StatusDot {
-                theme: tones
-                tone: pulzar.summary.tone
-                tooltipText: pulzar.summaryTooltip
-              }
-            }
-            trailingControl: Component {
-              Row {
-                spacing: Style.space(6)
-
-                LanguagePicker {
-                  anchors.verticalCenter: parent.verticalCenter
-                  theme: tones
-                  options: pulzar.languageOptions
-                  value: telemetry.languageChoice
-                  tooltipText: pulzar.t.chooseLanguage
-                  onChanged: function(value) { telemetry.setLanguage(value) }
-                }
-
-                PanelActionButton {
-                  anchors.verticalCenter: parent.verticalCenter
-                  radius: tones.radius
-                  iconText: pulzar.iconRefresh
-                  tooltipText: pulzar.t.refresh
-                  foreground: tones.foreground
-                  fontFamily: tones.fontFamily
-                  onClicked: pulzar.refresh()
-                }
-              }
-            }
-          }
 
           // ---------- Without data ----------
           Column {
@@ -550,105 +619,6 @@ Panel {
               InfoRow { theme: tones; label: pulzar.t.manufacturingDate; value: pulzar.computer ? (pulzar.computer.manufacturingDate || pulzar.t.unknown) : "" }
               InfoRow { theme: tones; label: pulzar.t.agentVersion; value: pulzar.computer ? (pulzar.computer.agentVersion || pulzar.t.unknown) : "" }
               InfoRow { theme: tones; label: pulzar.t.systemInformationCollectedAt; value: pulzar.computer ? Format.formatDateTime(pulzar.computer.collectedAt, pulzar.t) : "" }
-            }
-          }
-
-          // ---------- This device on the platform ----------
-          SectionCard {
-            visible: telemetry.hasData && session.configured
-            theme: tones
-            title: pulzar.t.platformDevice
-            subheader: pulzar.t.platformDeviceSubtitle
-
-            readonly property var record: session.deviceRecord
-
-            // Signed out, or the platform declining to show a device. The
-            // decline is a plain state, not a failure: it is also what a
-            // machine that simply is not registered looks like.
-            Text {
-              textFormat: Text.PlainText
-              visible: !session.signedIn || (!parent.record && session.deviceMessage !== "")
-                || (!parent.record && !session.deviceLooked)
-              width: parent.width
-              wrapMode: Text.WordWrap
-              text: {
-                if (!session.signedIn) return pulzar.t.signInToSeeDevice
-                if (session.deviceMessage !== "") return session.deviceMessage
-                return pulzar.t.lookingUpDevice
-              }
-              color: tones.dim
-              font.family: tones.fontFamily
-              font.pixelSize: Style.font.bodySmall
-            }
-
-            IconRow {
-              visible: !!parent.record
-              theme: tones
-              icon: pulzar.iconLaptop
-              tone: "secondary"
-              title: parent.record
-                ? [parent.record.brand, parent.record.model].filter(Boolean).join(" ") || parent.record.device_name || ""
-                : ""
-              caption: parent.record ? (parent.record.serial_number || "") : ""
-              chipText: parent.record ? (parent.record.status || "") : ""
-              chipTone: "success"
-            }
-
-            InfoRow {
-              visible: !!parent.record && !!parent.record.assigned_to
-              theme: tones
-              label: pulzar.t.assignedTo
-              value: parent.record && parent.record.assigned_to
-                ? (parent.record.assigned_to.name || parent.record.assigned_to.email || "") : ""
-            }
-
-            InfoRow {
-              visible: !!parent.record && !!parent.record.category
-              theme: tones
-              label: pulzar.t.deviceCategory
-              value: parent.record ? (parent.record.category || "") : ""
-            }
-
-            InfoRow {
-              visible: !!parent.record && !!parent.record.purchase_year
-              theme: tones
-              label: pulzar.t.purchaseYear
-              value: parent.record ? String(parent.record.purchase_year || "") : ""
-            }
-
-            InfoRow {
-              visible: !!parent.record && !!parent.record.mdm_provider
-              theme: tones
-              label: pulzar.t.enrolledWith
-              value: parent.record ? (parent.record.mdm_provider || "") : ""
-            }
-
-            InfoRow {
-              // Every field is compacted server-side, so an absent one is
-              // normal rather than a sign anything went wrong
-              visible: !!parent.record && !!parent.record.tags && parent.record.tags.length > 0
-              theme: tones
-              label: pulzar.t.deviceTags
-              value: parent.record && parent.record.tags ? parent.record.tags.join(", ") : ""
-            }
-
-            PanelSectionHeader {
-              visible: !!parent.record && !!parent.record.orders && parent.record.orders.length > 0
-              text: pulzar.t.recentOrders.toUpperCase()
-              foreground: tones.foreground
-              fontFamily: tones.fontFamily
-            }
-
-            Repeater {
-              model: session.deviceRecord && session.deviceRecord.orders
-                ? session.deviceRecord.orders : []
-
-              InfoRow {
-                required property var modelData
-                theme: tones
-                label: modelData.reference || ""
-                value: [modelData.status, modelData.created_on].filter(Boolean).join(" · ")
-              }
             }
           }
 

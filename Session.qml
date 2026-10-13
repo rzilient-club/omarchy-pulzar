@@ -63,7 +63,16 @@ QtObject {
   signal changed()
 
   function check() { root.run(["status"]) }
+  // Called when the platform tab is opened, and by its refresh button. Never
+  // on a timer and never on panel open: two of the fields behind it are live
+  // round trips to the MDM vendor, so the answer is fetched once per session
+  // and held.
   function lookUpDevice(serial) { if (serial) root.run(["device", serial]) }
+
+  function refreshDevice(serial) {
+    root.deviceLooked = false
+    root.lookUpDevice(serial)
+  }
   function signIn() { root.run(["login"]) }
   function signOut() {
     root.deviceRecord = null
