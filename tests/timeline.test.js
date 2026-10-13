@@ -16,7 +16,8 @@ const KNOWN = [
   "processed",
 ]
 
-const TONES = ["success", "info", "error", "warning", "grey"]
+// The tones Theme.tone() understands; anything else silently draws dim
+const TONES = ["success", "info", "error", "warning", "secondary", "default"]
 
 test("the map is exactly the actions the platform can send", () => {
   // Both directions. A missing action is a grey dot where a red one belongs;
