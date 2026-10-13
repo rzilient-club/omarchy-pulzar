@@ -23,8 +23,8 @@ import json
 import os
 import secrets
 import socket
+import subprocess
 import sys
-import threading
 import time
 import urllib.error
 import urllib.parse
@@ -35,6 +35,10 @@ import urllib.request
 # the API answers /oauth/authorize with JSON, because a React consent card
 # drives it, so sending a browser there shows a payload instead of a consent
 # screen. The card lives at the dashboard origin, where the session is.
+# Overridable so a test can point it at a stub that records its argv; the
+# handoff to the desktop is otherwise the one step nothing exercises.
+OPENER = os.environ.get("PULZAR_OPENER") or "xdg-open"
+
 ISSUER = "https://api.rzilient.tech"
 CONSENT_ORIGIN = "https://join.rzilient.club"
 # The application is a device_agent, whose only permitted scope is this one.
@@ -327,13 +331,25 @@ def login(issuer, client_id, consent_origin, open_browser=True):
         "code_challenge_method": "S256",
     })
 
-    emit(ok=True, stage="awaiting_consent", url=authorize, redirect_uri=redirect_uri)
+    # The URL goes to the browser as one argv element. It used to go through
+    # os.system, which hands the string to /bin/sh, and sh reads the first `&`
+    # as the background operator: everything after client_id became shell
+    # variable assignments and six of the seven parameters never arrived. The
+    # consent page then correctly reported a malformed request. There is no
+    # quoting to get right here, only a shell not to use.
+    opened = True
 
     if open_browser:
-        threading.Thread(
-            target=lambda: os.system("xdg-open %s >/dev/null 2>&1" % urllib.parse.quote(authorize, safe=":/?=&")),
-            daemon=True,
-        ).start()
+        try:
+            subprocess.Popen([OPENER, authorize],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except OSError:
+            # Not fatal: the URL is in the line below, so the panel can still
+            # offer it. Saying so beats a browser that silently never appears.
+            opened = False
+
+    emit(ok=True, stage="awaiting_consent", url=authorize,
+         redirect_uri=redirect_uri, opened=opened)
 
     deadline = time.time() + WAIT_SECONDS
     while Redirect.result is None and time.time() < deadline:

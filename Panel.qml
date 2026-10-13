@@ -732,7 +732,8 @@ Panel {
               text: {
                 if (!session.configured) return pulzar.t.signInUnavailable
                 if (session.failure !== "") return pulzar.t.signInFailed(session.failure)
-                if (session.consentUrl !== "") return pulzar.t.awaitingConsent
+                if (session.consentUrl !== "")
+                  return session.consentOpened ? pulzar.t.awaitingConsent : pulzar.t.openSignInPage
                 if (session.signedIn && session.expired) return pulzar.t.sessionExpired
                 if (!session.signedIn && session.revokeFailed !== "") return pulzar.t.signOutNotRevoked
                 return session.signedIn ? pulzar.t.signedIn : pulzar.t.notSignedIn
