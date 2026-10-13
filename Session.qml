@@ -38,6 +38,10 @@ QtObject {
   property string failure: ""
   // The page the user has to approve in, while a sign-in is in flight
   property string consentUrl: ""
+  // False when the helper could not launch a browser. The URL is still in
+  // consentUrl, so the panel can tell the person to open it rather than
+  // claiming a browser is waiting for them when none appeared.
+  property bool consentOpened: true
   // Set when signing out removed the credential here but could not get the
   // platform to retire it. Worth saying: the token stays usable until it
   // expires, so "signed out" would otherwise be half true.
@@ -61,6 +65,7 @@ QtObject {
     root.busy = true
     root.failure = ""
     root.consentUrl = ""
+    root.consentOpened = true
     root.revokeFailed = ""
 
     // The client id travels in the environment rather than the command line,
@@ -95,6 +100,7 @@ QtObject {
 
     if (message.stage === "awaiting_consent") {
       root.consentUrl = String(message.url || "")
+      root.consentOpened = message.opened !== false
       return
     }
 

@@ -444,6 +444,78 @@ class Flow(unittest.TestCase):
         self.assertEqual(pulzar_auth.CONSENT_ORIGIN, "https://join.rzilient.club")
         self.assertNotEqual(pulzar_auth.CONSENT_ORIGIN, pulzar_auth.ISSUER)
 
+    def opener_stub(self):
+        """A stand-in browser that records the argv it was handed, one line each."""
+        recorded = os.path.join(self.state, "opener-argv")
+        stub = os.path.join(self.state, "opener")
+        with open(stub, "w") as f:
+            f.write("#!/bin/sh\n")
+            # One line per argument, so a URL split by the shell shows up as
+            # several lines rather than hiding inside one
+            f.write('for a in "$@"; do printf "%s\\n" "$a"; done > ' + recorded + "\n")
+        os.chmod(stub, 0o755)
+        return stub, recorded
+
+    def test_the_browser_receives_the_whole_url(self):
+        """The handoff to the desktop, which no other test exercises.
+
+        This went through os.system, so /bin/sh read the first & as the
+        background operator and six of the seven parameters became shell
+        variable assignments. Everything else was correct: login() built the
+        full URL and reported it. Only the browser got a truncated one, which
+        is why a green suite sat on top of a plugin that could not sign in.
+        """
+        stub, recorded = self.opener_stub()
+        environment = dict(os.environ, XDG_STATE_HOME=self.state,
+                           PULZAR_ISSUER=self.issuer, PULZAR_CONSENT_ORIGIN=self.consent,
+                           PULZAR_CLIENT_ID=CLIENT_ID, PULZAR_OPENER=stub)
+        # Note: no PULZAR_NO_BROWSER — the point is to let it open one
+        process = subprocess.Popen([sys.executable, HELPER, "login"],
+                                   stdout=subprocess.PIPE, text=True, env=environment)
+        with process.stdout as stream:
+            first = json.loads(stream.readline())
+            self.visit(first["url"])
+            stream.read()
+        process.wait(timeout=30)
+
+        deadline = time.time() + 10
+        while not os.path.exists(recorded) and time.time() < deadline:
+            time.sleep(0.05)
+        self.assertTrue(os.path.exists(recorded), "the opener was never run")
+
+        with open(recorded) as f:
+            argv = [line.rstrip("\n") for line in f if line.strip()]
+
+        self.assertEqual(len(argv), 1,
+                         "the URL reached the browser in %d pieces: %r" % (len(argv), argv))
+
+        query = urllib.parse.parse_qs(urllib.parse.urlparse(argv[0]).query)
+        self.assertEqual(sorted(query), sorted([
+            "client_id", "redirect_uri", "response_type",
+            "scope", "state", "code_challenge", "code_challenge_method"]))
+        self.assertEqual(query["code_challenge_method"], ["S256"])
+        self.assertEqual(query["scope"], ["device_self"])
+        self.assertTrue(first["opened"])
+
+    def test_a_missing_browser_is_reported_not_fatal(self):
+        """The URL is in the message, so the panel can still offer it."""
+        environment = dict(os.environ, XDG_STATE_HOME=self.state,
+                           PULZAR_ISSUER=self.issuer, PULZAR_CONSENT_ORIGIN=self.consent,
+                           PULZAR_CLIENT_ID=CLIENT_ID,
+                           PULZAR_OPENER=os.path.join(self.state, "does-not-exist"))
+        process = subprocess.Popen([sys.executable, HELPER, "login"],
+                                   stdout=subprocess.PIPE, text=True, env=environment)
+        with process.stdout as stream:
+            first = json.loads(stream.readline())
+            self.assertFalse(first["opened"])
+            self.assertTrue(first["url"].startswith(self.consent))
+            self.visit(first["url"])
+            rest = [json.loads(l) for l in stream.read().splitlines() if l.strip()]
+        process.wait(timeout=30)
+
+        # The sign-in still completes once the person reaches the URL
+        self.assertEqual(rest[-1]["stage"], "signed_in")
+
     def test_the_pkce_pair_matches_the_rfc_vector(self):
         verifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
         digest = hashlib.sha256(verifier.encode()).digest()
