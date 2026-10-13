@@ -12,13 +12,13 @@
 // it is worse than one with a generic marker, because nothing tells the reader
 // an event is missing.
 
-var FALLBACK = { icon: "\u{F02FC}", tone: "grey" }
+var FALLBACK = { icon: "\u{F02FC}", tone: "default" }
 
 var ACTIONS = {
   create:      { icon: "\u{F0415}", tone: "success" },
   update:      { icon: "\u{F03EB}", tone: "info" },
   destroy:     { icon: "\u{F0A7A}", tone: "error" },
-  list:        { icon: "\u{F0279}", tone: "grey" },
+  list:        { icon: "\u{F0279}", tone: "default" },
   activate:    { icon: "\u{F0E1E}", tone: "success" },
   upload:      { icon: "\u{F0552}", tone: "info" },
   invite:      { icon: "\u{F0014}", tone: "info" },
@@ -31,7 +31,7 @@ var ACTIONS = {
   override:    { icon: "\u{F0450}", tone: "warning" },
   security:    { icon: "\u{F0483}", tone: "info" },
   mismatch:    { icon: "\u{F0028}", tone: "warning" },
-  retire:      { icon: "\u{F0A79}", tone: "grey" },
+  retire:      { icon: "\u{F0A79}", tone: "default" },
   repair:      { icon: "\u{F0862}", tone: "warning" },
   collected:   { icon: "\u{F012C}", tone: "success" },
   stolen:      { icon: "\u{F0099}", tone: "error" },
@@ -42,7 +42,7 @@ var ACTIONS = {
   enterprise_wipe: { icon: "\u{F01B4}", tone: "error" },
   lock:        { icon: "\u{F033E}", tone: "warning" },
   reboot:      { icon: "\u{F0709}", tone: "info" },
-  none:        { icon: "\u{F02FC}", tone: "grey" },
+  none:        { icon: "\u{F02FC}", tone: "default" },
   change_name: { icon: "\u{F03EB}", tone: "info" },
   lost_mode:   { icon: "\u{F0099}", tone: "warning" },
   processed:   { icon: "\u{F012C}", tone: "success" }

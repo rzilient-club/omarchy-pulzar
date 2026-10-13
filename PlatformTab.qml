@@ -10,13 +10,17 @@ import "Config.js" as Config
 // What only the platform knows: who manages the machine, how it is protected,
 // and what has happened to it.
 //
+// Built from the same pieces as the pulzar tab — SectionCard, InfoRow,
+// IconRow, StatusChip — and the same theme, so the two tabs read as one panel
+// rather than as two products sharing a window.
+//
 // Every field here is optional. The payload is compacted server-side, so an
-// absent key means nobody has said — which is not the same as false, and must
+// absent key means nobody has said, which is not the same as false and must
 // not be drawn as false. Everything branches on presence.
 Flickable {
   id: root
 
-  required property var dash
+  required property var theme
   required property var t
   property var record: null
   property string message: ""
@@ -26,29 +30,30 @@ Flickable {
   readonly property var mdm: root.record && root.record.mdm ? root.record.mdm : null
   readonly property var security: root.record && root.record.security ? root.record.security : null
   readonly property var timeline: root.record && root.record.timeline ? root.record.timeline : []
+  // The company dropped this MDM: provider and status are still true, so they
+  // are drawn down rather than hidden — the machine really is still enrolled
+  // in something nobody is running any more
+  readonly property bool mdmDropped: root.has(root.mdm, "configured") && !root.mdm.configured
 
   function has(object, key) {
     return !!object && object[key] !== undefined && object[key] !== null
   }
 
-  function yesNo(value) {
-    return value ? root.t.yes : root.t.no
-  }
-
-  function boolTone(value) {
-    return value ? "success" : "error"
-  }
+  function yesNo(value) { return value ? root.t.yes : root.t.no }
+  function boolTone(value) { return value ? "success" : "error" }
 
   contentWidth: width
   contentHeight: column.implicitHeight
   clip: true
   boundsBehavior: Flickable.StopAtBounds
+  flickableDirection: Flickable.VerticalFlick
+  interactive: contentHeight > height
   ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
 
   Column {
     id: column
-    width: root.width
-    spacing: root.dash.space(16)
+    width: root.width - (root.interactive ? Style.space(8) : 0)
+    spacing: Style.space(14)
 
     // ---------- Nothing to show ----------
     Text {
@@ -56,104 +61,82 @@ Flickable {
       visible: !root.record
       width: parent.width
       wrapMode: Text.WordWrap
+      horizontalAlignment: Text.AlignHCenter
       text: {
         if (!root.signedIn) return root.t.signInToSeeDevice
         if (root.loading) return root.t.lookingUpDevice
-        // The platform's own words, passed through: one message covers a
-        // serial it does not know, someone else's machine and an unassigned
-        // one alike, and rewording it would invent a certainty
+        // The platform's own words: one message covers a serial it does not
+        // know, someone else's machine and an unassigned one alike, and
+        // rewording it would invent a certainty it did not express
         if (root.message !== "") return root.message
         return root.t.nothingFromPlatform
       }
-      color: root.dash.textSecondary
-      font.family: root.dash.fontFamily
-      font.pixelSize: root.dash.sizeBody
+      color: root.theme.dim
+      font.family: root.theme.fontFamily
+      font.pixelSize: Style.font.bodySmall
     }
 
-    // ---------- The device itself ----------
-    // Not one of the three sections asked for, but this is the subject of the
-    // tab and it is platform data: it cannot stay on the local tab, which must
-    // not trigger a fetch. Placed first because the rest describes it.
-    DashCard {
+    // ---------- The device ----------
+    SectionCard {
       visible: !!root.record
-      dash: root.dash
+      theme: root.theme
       title: root.t.platformDevice
 
-      Text {
-        textFormat: Text.PlainText
-        width: parent.width
-        elide: Text.ElideRight
-        text: root.record
+      IconRow {
+        theme: root.theme
+        icon: "\u{F0322}"
+        tone: "secondary"
+        title: root.record
           ? ([root.record.brand, root.record.model].filter(Boolean).join(" ")
              || root.record.device_name || "")
           : ""
-        color: root.dash.text
-        font.family: root.dash.fontFamily
-        font.pixelSize: root.dash.sizeHeader
-        font.weight: Font.DemiBold
+        caption: root.record ? String(root.record.serial_number || "") : ""
+        chipText: root.record ? String(root.record.status || "") : ""
+        chipTone: "success"
       }
 
-      DashRow {
-        visible: root.has(root.record, "serial_number")
-        dash: root.dash
-        label: root.t.serialNumber
-        value: root.record ? String(root.record.serial_number || "") : ""
-      }
-
-      DashRow {
+      InfoRow {
         visible: !!root.record && !!root.record.assigned_to
-        dash: root.dash
+        theme: root.theme
         label: root.t.assignedTo
         value: root.record && root.record.assigned_to
           ? (root.record.assigned_to.name || root.record.assigned_to.email || "") : ""
       }
 
-      DashRow {
+      InfoRow {
         visible: root.has(root.record, "category")
-        dash: root.dash
+        theme: root.theme
         label: root.t.deviceCategory
         value: root.record ? String(root.record.category || "") : ""
       }
 
-      DashRow {
-        visible: root.has(root.record, "status")
-        dash: root.dash
-        label: root.t.deviceStatus
-        chipText: root.record ? String(root.record.status || "") : ""
-        chipTone: "success"
-      }
-
-      DashRow {
+      InfoRow {
         visible: root.has(root.record, "purchase_year")
-        dash: root.dash
+        theme: root.theme
         label: root.t.purchaseYear
         value: root.record ? String(root.record.purchase_year || "") : ""
       }
 
-      DashRow {
+      InfoRow {
         visible: !!root.record && !!root.record.tags && root.record.tags.length > 0
-        dash: root.dash
+        theme: root.theme
         label: root.t.deviceTags
         value: root.record && root.record.tags ? root.record.tags.join(", ") : ""
       }
 
-      Text {
-        textFormat: Text.PlainText
+      PanelSectionHeader {
         visible: !!root.record && !!root.record.orders && root.record.orders.length > 0
-        width: parent.width
-        text: root.t.recentOrders
-        color: root.dash.textSecondary
-        font.family: root.dash.fontFamily
-        font.pixelSize: root.dash.sizeCaption
-        font.weight: Font.DemiBold
+        text: root.t.recentOrders.toUpperCase()
+        foreground: root.theme.foreground
+        fontFamily: root.theme.fontFamily
       }
 
       Repeater {
         model: root.record && root.record.orders ? root.record.orders : []
 
-        DashRow {
+        InfoRow {
           required property var modelData
-          dash: root.dash
+          theme: root.theme
           label: modelData.reference || ""
           value: [modelData.status, modelData.created_on].filter(Boolean).join(" · ")
         }
@@ -161,191 +144,184 @@ Flickable {
     }
 
     // ---------- Device management ----------
-    DashCard {
+    SectionCard {
       visible: !!root.mdm
-      dash: root.dash
+      theme: root.theme
       title: root.t.deviceManagement
 
-      Row {
+      Item {
         width: parent.width
-        spacing: root.dash.space(12)
+        implicitHeight: Math.max(logo.height, mdmName.implicitHeight)
+        opacity: root.mdmDropped ? 0.55 : 1
 
         // A path rather than a URL on purpose: the full one would be a signed
         // link with a lifetime of its own
         Image {
-          visible: root.has(root.mdm, "logo_path")
-          width: root.dash.space(40)
-          height: root.dash.space(40)
+          id: logo
+          visible: root.has(root.mdm, "logo_path") && status === Image.Ready
+          width: Style.font.icon
+          height: Style.font.icon
+          anchors.left: parent.left
+          anchors.verticalCenter: parent.verticalCenter
           fillMode: Image.PreserveAspectFit
-          source: root.has(root.mdm, "logo_path")
-            ? Config.ISSUER + root.mdm.logo_path : ""
-          // A logo that will not load is not worth an error box
-          onStatusChanged: if (status === Image.Error) visible = false
+          source: root.has(root.mdm, "logo_path") ? Config.ISSUER + root.mdm.logo_path : ""
         }
 
-        Column {
-          width: parent.width - (root.dash.space(52))
-          spacing: root.dash.space(2)
-
-          Text {
-            textFormat: Text.PlainText
-            width: parent.width
-            elide: Text.ElideRight
-            text: root.mdm ? (root.mdm.name || root.mdm.provider || "") : ""
-            color: root.dash.text
-            font.family: root.dash.fontFamily
-            font.pixelSize: root.dash.sizeBody
-            font.weight: Font.DemiBold
-          }
-
-          // The company dropped this MDM. Provider and status remain true, so
-          // they are drawn muted rather than hidden — the machine really is
-          // still enrolled in something nobody is running any more.
-          Text {
-            textFormat: Text.PlainText
-            visible: root.has(root.mdm, "configured") && !root.mdm.configured
-            width: parent.width
-            wrapMode: Text.WordWrap
-            text: root.t.mdmNotConfigured
-            color: root.dash.textSecondary
-            font.family: root.dash.fontFamily
-            font.pixelSize: root.dash.sizeCaption
-          }
+        Text {
+          id: mdmName
+          textFormat: Text.PlainText
+          anchors.left: logo.visible ? logo.right : parent.left
+          anchors.leftMargin: logo.visible ? Style.space(8) : 0
+          anchors.right: parent.right
+          anchors.verticalCenter: parent.verticalCenter
+          elide: Text.ElideRight
+          text: root.mdm ? (root.mdm.name || root.mdm.provider || "") : ""
+          color: root.theme.foreground
+          font.family: root.theme.fontFamily
+          font.pixelSize: Style.font.bodySmall
+          font.bold: true
         }
       }
 
-      DashRow {
+      Text {
+        textFormat: Text.PlainText
+        visible: root.mdmDropped
+        width: parent.width
+        wrapMode: Text.WordWrap
+        text: root.t.mdmNotConfigured
+        color: root.theme.dim
+        font.family: root.theme.fontFamily
+        font.pixelSize: Style.font.caption
+      }
+
+      InfoRow {
         visible: root.has(root.mdm, "status")
-        dash: root.dash
+        opacity: root.mdmDropped ? 0.55 : 1
+        theme: root.theme
         label: root.t.mdmStatus
         value: root.mdm ? String(root.mdm.status || "") : ""
-        muted: root.has(root.mdm, "configured") && !root.mdm.configured
       }
 
-      DashRow {
+      InfoRow {
         visible: root.has(root.mdm, "enrolled")
-        dash: root.dash
+        opacity: root.mdmDropped ? 0.55 : 1
+        theme: root.theme
         label: root.t.mdmEnrolled
-        chipText: root.mdm ? root.yesNo(root.mdm.enrolled) : ""
-        chipTone: root.mdm ? root.boolTone(root.mdm.enrolled) : "secondary"
-        muted: root.has(root.mdm, "configured") && !root.mdm.configured
+        value: root.mdm ? root.yesNo(root.mdm.enrolled) : ""
+        tone: root.mdm ? root.boolTone(root.mdm.enrolled) : ""
       }
 
-      DashRow {
+      InfoRow {
         visible: root.has(root.mdm, "online")
-        dash: root.dash
+        theme: root.theme
         label: root.t.mdmOnline
-        chipText: root.mdm ? root.yesNo(root.mdm.online) : ""
-        chipTone: root.mdm ? root.boolTone(root.mdm.online) : "secondary"
+        value: root.mdm ? root.yesNo(root.mdm.online) : ""
+        tone: root.mdm ? root.boolTone(root.mdm.online) : ""
       }
 
-      DashRow {
+      InfoRow {
         visible: root.has(root.mdm, "dual_enrolment")
-        dash: root.dash
+        theme: root.theme
         label: root.t.mdmDualEnrolment
-        chipText: root.mdm ? root.yesNo(root.mdm.dual_enrolment) : ""
+        value: root.mdm ? root.yesNo(root.mdm.dual_enrolment) : ""
         // Two MDMs on one machine is a problem, not an achievement
-        chipTone: root.mdm && root.mdm.dual_enrolment ? "warning" : "success"
+        tone: root.mdm && root.mdm.dual_enrolment ? "warning" : "success"
       }
     }
 
     // ---------- Security ----------
     // Absent for a non-computer category, and absent again when the MDM could
     // not be reached, so the card simply does not appear
-    DashCard {
+    SectionCard {
       visible: !!root.security
-      dash: root.dash
+      theme: root.theme
       title: root.t.securityPosture
 
-      DashRow {
+      InfoRow {
         visible: root.has(root.security, "score")
-        dash: root.dash
+        theme: root.theme
         label: root.t.securityScore
         value: root.security ? String(root.security.score || "") : ""
       }
 
-      DashRow {
+      InfoRow {
         visible: root.has(root.security, "scan")
-        dash: root.dash
+        theme: root.theme
         label: root.t.securityScan
-        chipText: root.security ? root.yesNo(root.security.scan) : ""
-        chipTone: root.security ? root.boolTone(root.security.scan) : "secondary"
+        value: root.security ? root.yesNo(root.security.scan) : ""
+        tone: root.security ? root.boolTone(root.security.scan) : ""
       }
 
-      DashRow {
+      InfoRow {
         visible: !!root.security && !!root.security.antivirus
-        dash: root.dash
+        theme: root.theme
         label: root.t.antivirus
         value: root.security && root.security.antivirus
           ? [root.security.antivirus.name, root.security.antivirus.version].filter(Boolean).join(" ") : ""
-        chipText: root.security && root.security.antivirus
-          && root.security.antivirus.active !== undefined
-          ? root.yesNo(root.security.antivirus.active) : ""
-        chipTone: root.security && root.security.antivirus
-          ? root.boolTone(root.security.antivirus.active) : "secondary"
+        trailing: antivirusChip
       }
 
-      // Two fields for one fact, and that is deliberate: the connectors
-      // disagree on the type. Some answer a real boolean, others a vendor
-      // string like ENCRYPTED_PARTIALLY_PROTECTED. The boolean becomes a chip;
-      // the string is shown as written, because mapping vendor strings onto
-      // true or false is a decision nobody has made yet and guessing it here
-      // would quietly answer a question about whether a disk is protected.
-      DashRow {
+      // Two fields for one fact, deliberately: the connectors disagree on the
+      // type. Some answer a real boolean, others a vendor string such as
+      // ENCRYPTED_PARTIALLY_PROTECTED. The boolean becomes a chip; the string
+      // is shown as written, because mapping vendor strings onto true or false
+      // is a decision nobody has made and guessing it here would quietly
+      // answer a question about whether a disk is protected.
+      InfoRow {
         visible: root.has(root.security, "encrypted")
-        dash: root.dash
+        theme: root.theme
         label: root.t.encryptionState
-        chipText: root.security ? root.yesNo(root.security.encrypted) : ""
-        chipTone: root.security ? root.boolTone(root.security.encrypted) : "secondary"
+        value: root.security ? root.yesNo(root.security.encrypted) : ""
+        tone: root.security ? root.boolTone(root.security.encrypted) : ""
       }
 
-      DashRow {
+      InfoRow {
         visible: !root.has(root.security, "encrypted")
           && root.has(root.security, "encryption_status")
-        dash: root.dash
+        theme: root.theme
         label: root.t.encryptionState
         value: root.security ? String(root.security.encryption_status || "") : ""
       }
 
-      DashRow {
+      InfoRow {
         visible: root.has(root.security, "encryption_method")
-        dash: root.dash
+        theme: root.theme
         label: root.t.encryptionMethod
         value: root.security ? String(root.security.encryption_method || "") : ""
       }
 
-      // Whether a recovery key is escrowed, and nothing more. The key itself
-      // is never in this payload and is never asked for from here: it sits
-      // behind a role-gated, audited endpoint for managers.
-      DashRow {
+      // Whether a recovery key is escrowed, and nothing more. The key itself is
+      // never in this payload and is never asked for from here: it sits behind
+      // a role-gated, audited endpoint.
+      InfoRow {
         visible: root.has(root.security, "recovery_escrowed")
-        dash: root.dash
+        theme: root.theme
         label: root.t.recoveryEscrowed
-        chipText: root.security ? root.yesNo(root.security.recovery_escrowed) : ""
-        chipTone: root.security ? root.boolTone(root.security.recovery_escrowed) : "secondary"
+        value: root.security ? root.yesNo(root.security.recovery_escrowed) : ""
+        tone: root.security ? root.boolTone(root.security.recovery_escrowed) : ""
       }
 
-      DashRow {
+      InfoRow {
         visible: root.has(root.security, "device_enrollment_program")
-        dash: root.dash
+        theme: root.theme
         label: root.t.enrollmentProgram
-        chipText: root.security ? root.yesNo(root.security.device_enrollment_program) : ""
-        chipTone: root.security && root.security.device_enrollment_program ? "success" : "secondary"
+        value: root.security ? root.yesNo(root.security.device_enrollment_program) : ""
+        tone: root.security && root.security.device_enrollment_program ? "success" : "secondary"
       }
 
-      DashRow {
+      InfoRow {
         visible: root.has(root.security, "pulzar_enrolled")
-        dash: root.dash
+        theme: root.theme
         label: root.t.agentEnrolled
-        chipText: root.security ? root.yesNo(root.security.pulzar_enrolled) : ""
-        chipTone: root.security ? root.boolTone(root.security.pulzar_enrolled) : "secondary"
+        value: root.security ? root.yesNo(root.security.pulzar_enrolled) : ""
+        tone: root.security ? root.boolTone(root.security.pulzar_enrolled) : ""
       }
     }
 
     // ---------- Lifecycle ----------
-    DashCard {
+    SectionCard {
       visible: root.timeline.length > 0
-      dash: root.dash
+      theme: root.theme
       title: root.t.lifecycle
 
       Repeater {
@@ -357,7 +333,7 @@ Flickable {
 
           readonly property var look: TimelineJs.appearance(modelData.action)
 
-          dash: root.dash
+          theme: root.theme
           icon: look.icon
           tone: look.tone
           headline: modelData.headline || ""
@@ -367,6 +343,19 @@ Flickable {
           last: index === root.timeline.length - 1
         }
       }
+    }
+  }
+
+  Component {
+    id: antivirusChip
+
+    StatusChip {
+      theme: root.theme
+      tone: root.security && root.security.antivirus
+        ? root.boolTone(root.security.antivirus.active) : "default"
+      text: root.security && root.security.antivirus
+        && root.security.antivirus.active !== undefined
+        ? root.yesNo(root.security.antivirus.active) : ""
     }
   }
 }

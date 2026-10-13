@@ -148,13 +148,6 @@ Panel {
     consentOrigin: pulzar.setting("consentOrigin", "") || session.defaultConsentOrigin
   }
 
-  Dashboard {
-    id: dash
-    tenant: session.deviceRecord && session.deviceRecord.theme
-      ? session.deviceRecord.theme : null
-    fontFamily: tones.fontFamily
-  }
-
   Theme {
     id: tones
     bar: pulzar.bar
@@ -356,7 +349,7 @@ Panel {
         anchors.topMargin: Style.space(14)
         anchors.bottom: footer.top
         anchors.bottomMargin: Style.space(12)
-        dash: dash
+        theme: tones
         t: pulzar.t
         record: session.deviceRecord
         message: session.deviceMessage
