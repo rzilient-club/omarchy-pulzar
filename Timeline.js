@@ -2,6 +2,11 @@
 
 // How a timeline entry is drawn: which icon, which colour.
 //
+// The actions are Notification's enum in the backend — DevicesAction::ACTIONS
+// plus the list beside it — and not the dashboard's own map, which differs:
+// the dashboard carries `transfer`, which the backend cannot send, and omits
+// `enterprise_wipe`, which it can.
+//
 // The list of actions grows server-side, so anything unrecognised falls back
 // to a neutral dot rather than being dropped — a history with a silent hole in
 // it is worse than one with a generic marker, because nothing tells the reader
@@ -31,9 +36,12 @@ var ACTIONS = {
   collected:   { icon: "\u{F012C}", tone: "success" },
   stolen:      { icon: "\u{F0099}", tone: "error" },
   wipe:        { icon: "\u{F01B4}", tone: "error" },
+  // Not a lesser wipe: the same destructive treatment, because drawing it as
+  // anything calmer understates about the most consequential thing that can
+  // happen to a machine
+  enterprise_wipe: { icon: "\u{F01B4}", tone: "error" },
   lock:        { icon: "\u{F033E}", tone: "warning" },
   reboot:      { icon: "\u{F0709}", tone: "info" },
-  transfer:    { icon: "\u{F04E1}", tone: "info" },
   none:        { icon: "\u{F02FC}", tone: "grey" },
   change_name: { icon: "\u{F03EB}", tone: "info" },
   lost_mode:   { icon: "\u{F0099}", tone: "warning" },

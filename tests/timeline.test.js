@@ -4,21 +4,27 @@ const { test } = require("node:test")
 const assert = require("node:assert/strict")
 const Timeline = require("./load")("Timeline.js")
 
-// Every action the platform sends today
+// Notification's enum in the backend: DevicesAction::ACTIONS plus the list
+// declared beside it. Not the dashboard's map, which carries an action the
+// backend cannot send and omits one it can.
 const KNOWN = [
-  "create", "update", "destroy", "list", "activate", "upload", "invite",
-  "confirm", "approve", "complete", "assign_to", "rescheduled", "cancel",
-  "override", "security", "mismatch", "retire", "repair", "collected",
-  "stolen", "wipe", "lock", "reboot", "transfer", "none", "change_name",
-  "lost_mode", "processed",
+  "lock", "wipe", "enterprise_wipe", "change_name", "reboot", "lost_mode",
+  "retire", "repair",
+  "none", "create", "update", "destroy", "list", "activate", "upload",
+  "invite", "confirm", "approve", "complete", "assign_to", "rescheduled",
+  "cancel", "override", "security", "mismatch", "collected", "stolen",
+  "processed",
 ]
 
 const TONES = ["success", "info", "error", "warning", "grey"]
 
-test("every action the platform sends has an appearance", () => {
-  for (const action of KNOWN) {
-    assert.ok(action in Timeline.ACTIONS, `${ action } is unmapped`)
-  }
+test("the map is exactly the actions the platform can send", () => {
+  // Both directions. A missing action is a grey dot where a red one belongs;
+  // an extra one is a claim about something that cannot arrive, and it is how
+  // enterprise_wipe came to be absent in the first place — the list was taken
+  // from the dashboard rather than from the enum.
+  const mapped = Object.keys(Timeline.ACTIONS).sort()
+  assert.deepEqual(mapped, [...KNOWN].sort())
 })
 
 test("an action nobody has mapped still draws a row", () => {
@@ -40,7 +46,7 @@ test("every appearance has an icon and a tone the dashboard knows", () => {
 
 test("destructive actions are not drawn as successes", () => {
   // A wiped or stolen machine reading green would be actively misleading
-  for (const action of ["destroy", "stolen", "wipe", "cancel"]) {
+  for (const action of ["destroy", "stolen", "wipe", "enterprise_wipe", "cancel"]) {
     assert.notEqual(Timeline.appearance(action).tone, "success", action)
   }
 })
