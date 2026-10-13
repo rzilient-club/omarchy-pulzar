@@ -52,11 +52,25 @@ QtObject {
   // The helper sits next to this file; Quickshell hands back a file:// URL
   readonly property string helper: String(Qt.resolvedUrl("bin/pulzar-auth")).replace(/^file:\/\//, "")
 
+  // The platform's record of this machine, once signed in
+  property var deviceRecord: null
+  // The platform's own words when it will not show a device. One message
+  // covers a serial it does not know, someone else's machine and an
+  // unassigned one alike, so it is shown as written rather than interpreted.
+  property string deviceMessage: ""
+  property bool deviceLooked: false
+
   signal changed()
 
   function check() { root.run(["status"]) }
+  function lookUpDevice(serial) { if (serial) root.run(["device", serial]) }
   function signIn() { root.run(["login"]) }
-  function signOut() { root.run(["logout"]) }
+  function signOut() {
+    root.deviceRecord = null
+    root.deviceMessage = ""
+    root.deviceLooked = false
+    root.run(["logout"])
+  }
   function renew() { root.run(["refresh"]) }
 
   function run(commandArgs) {
@@ -101,6 +115,14 @@ QtObject {
     if (message.stage === "awaiting_consent") {
       root.consentUrl = String(message.url || "")
       root.consentOpened = message.opened !== false
+      return
+    }
+
+    if (message.stage === "device") {
+      root.deviceRecord = message.found ? message.device : null
+      root.deviceMessage = message.found ? "" : String(message.message || "")
+      root.deviceLooked = true
+      root.changed()
       return
     }
 

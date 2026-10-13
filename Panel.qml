@@ -37,6 +37,13 @@ Panel {
 
   // Arch's own page on dm-crypt: the distribution this runs on, and the only
   // instructions that cover converting a partition that is already in use
+  // The serial the platform knows this machine by. A literal for now, by
+  // Eduard's decision: the real source is pulzar.status.device.serial, which
+  // reads empty on this machine because the vendor left the DMI template and
+  // Snapshot.js reports a placeholder as no value at all. Swapping this for
+  // that line is the whole change once a machine reports a real serial.
+  readonly property string platformSerial: "39P70Y2"
+
   readonly property string encryptionGuideUrl: "https://wiki.archlinux.org/title/Dm-crypt/Device_encryption#Encrypt_an_existing_unencrypted_file_system"
 
   // Feedback of the copy button
@@ -109,6 +116,15 @@ Panel {
     id: telemetry
     snapshotPath: pulzar.setting("snapshotPath", "") || Snapshot.DEFAULT_PATH
     refreshIntervalSec: pulzar.setting("refreshIntervalSec", 5)
+  }
+
+  Connections {
+    target: session
+    function onChanged() {
+      // One lookup per sign-in: the record only changes when the session does
+      if (session.signedIn && !session.deviceLooked && !session.busy)
+        session.lookUpDevice(pulzar.platformSerial)
+    }
   }
 
   Session {
@@ -520,6 +536,105 @@ Panel {
               InfoRow { theme: tones; label: pulzar.t.manufacturingDate; value: pulzar.computer ? (pulzar.computer.manufacturingDate || pulzar.t.unknown) : "" }
               InfoRow { theme: tones; label: pulzar.t.agentVersion; value: pulzar.computer ? (pulzar.computer.agentVersion || pulzar.t.unknown) : "" }
               InfoRow { theme: tones; label: pulzar.t.systemInformationCollectedAt; value: pulzar.computer ? Format.formatDateTime(pulzar.computer.collectedAt, pulzar.t) : "" }
+            }
+          }
+
+          // ---------- This device on the platform ----------
+          SectionCard {
+            visible: telemetry.hasData && session.configured
+            theme: tones
+            title: pulzar.t.platformDevice
+            subheader: pulzar.t.platformDeviceSubtitle
+
+            readonly property var record: session.deviceRecord
+
+            // Signed out, or the platform declining to show a device. The
+            // decline is a plain state, not a failure: it is also what a
+            // machine that simply is not registered looks like.
+            Text {
+              textFormat: Text.PlainText
+              visible: !session.signedIn || (!parent.record && session.deviceMessage !== "")
+                || (!parent.record && !session.deviceLooked)
+              width: parent.width
+              wrapMode: Text.WordWrap
+              text: {
+                if (!session.signedIn) return pulzar.t.signInToSeeDevice
+                if (session.deviceMessage !== "") return session.deviceMessage
+                return pulzar.t.lookingUpDevice
+              }
+              color: tones.dim
+              font.family: tones.fontFamily
+              font.pixelSize: Style.font.bodySmall
+            }
+
+            IconRow {
+              visible: !!parent.record
+              theme: tones
+              icon: pulzar.iconLaptop
+              tone: "secondary"
+              title: parent.record
+                ? [parent.record.brand, parent.record.model].filter(Boolean).join(" ") || parent.record.device_name || ""
+                : ""
+              caption: parent.record ? (parent.record.serial_number || "") : ""
+              chipText: parent.record ? (parent.record.status || "") : ""
+              chipTone: "success"
+            }
+
+            InfoRow {
+              visible: !!parent.record && !!parent.record.assigned_to
+              theme: tones
+              label: pulzar.t.assignedTo
+              value: parent.record && parent.record.assigned_to
+                ? (parent.record.assigned_to.name || parent.record.assigned_to.email || "") : ""
+            }
+
+            InfoRow {
+              visible: !!parent.record && !!parent.record.category
+              theme: tones
+              label: pulzar.t.deviceCategory
+              value: parent.record ? (parent.record.category || "") : ""
+            }
+
+            InfoRow {
+              visible: !!parent.record && !!parent.record.purchase_year
+              theme: tones
+              label: pulzar.t.purchaseYear
+              value: parent.record ? String(parent.record.purchase_year || "") : ""
+            }
+
+            InfoRow {
+              visible: !!parent.record && !!parent.record.mdm_provider
+              theme: tones
+              label: pulzar.t.enrolledWith
+              value: parent.record ? (parent.record.mdm_provider || "") : ""
+            }
+
+            InfoRow {
+              // Every field is compacted server-side, so an absent one is
+              // normal rather than a sign anything went wrong
+              visible: !!parent.record && !!parent.record.tags && parent.record.tags.length > 0
+              theme: tones
+              label: pulzar.t.deviceTags
+              value: parent.record && parent.record.tags ? parent.record.tags.join(", ") : ""
+            }
+
+            PanelSectionHeader {
+              visible: !!parent.record && !!parent.record.orders && parent.record.orders.length > 0
+              text: pulzar.t.recentOrders.toUpperCase()
+              foreground: tones.foreground
+              fontFamily: tones.fontFamily
+            }
+
+            Repeater {
+              model: session.deviceRecord && session.deviceRecord.orders
+                ? session.deviceRecord.orders : []
+
+              InfoRow {
+                required property var modelData
+                theme: tones
+                label: modelData.reference || ""
+                value: [modelData.status, modelData.created_on].filter(Boolean).join(" · ")
+              }
             }
           }
 

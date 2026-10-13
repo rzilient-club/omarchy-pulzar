@@ -31,6 +31,22 @@ pulzar_auth = importlib.util.module_from_spec(spec)
 loader.exec_module(pulzar_auth)
 
 CLIENT_ID = "pulzar-test-client"
+KNOWN_SERIAL = "39P70Y2"
+REFUSAL = "No device with that serial number is assigned to you."
+DEVICE_RECORD = {
+    "serial_number": KNOWN_SERIAL,
+    "brand": "Dell",
+    "model": "Latitude 7440",
+    "device_name": "duarkov",
+    "category": "Laptop",
+    "assigned_to": {"id": "u-1", "name": "Eduard Garcia", "email": "eduard@example.com"},
+    "status": "active",
+    "enrolled": {"intune": "abc-123"},
+    "mdm_provider": "intune",
+    "purchase_year": 2024,
+    "tags": ["engineering"],
+    "orders": [{"reference": "ORD-9", "status": "delivered", "created_on": "2024-03-01"}],
+}
 
 
 class Platform(http.server.BaseHTTPRequestHandler):
@@ -40,6 +56,9 @@ class Platform(http.server.BaseHTTPRequestHandler):
     faults = []
     live = set()
     spent = set()
+    live_access = set()
+    mcp_calls = []
+    refuse_access = False
     revoke_stalls = False
 
     def do_GET(self):
@@ -91,6 +110,10 @@ class Platform(http.server.BaseHTTPRequestHandler):
             self.end_headers()
             return
 
+        if path == "/mcp":
+            self.handle_mcp()
+            return
+
         if path != "/oauth/token":
             self.send_error(404)
             return
@@ -118,6 +141,7 @@ class Platform(http.server.BaseHTTPRequestHandler):
                 self.send_error(400, "invalid_grant")
                 return
             Platform.live.add("rt-1")
+            Platform.live_access.add("at-1")
             self.json({"access_token": "at-1", "refresh_token": "rt-1",
                        "token_type": "Bearer", "expires_in": 7200, "scope": "external_api"})
             return
@@ -130,11 +154,46 @@ class Platform(http.server.BaseHTTPRequestHandler):
                 return
             Platform.spent.add(presented)
             Platform.live.add("rt-2")
+            Platform.live_access.add("at-2")
             self.json({"access_token": "at-2", "refresh_token": "rt-2",
                        "token_type": "Bearer", "expires_in": 7200, "scope": "external_api"})
             return
 
         self.send_error(400, "unsupported_grant_type")
+
+    def handle_mcp(self):
+        body = self.rfile.read(int(self.headers.get("Content-Length", 0))).decode()
+        Platform.mcp_calls.append(body)
+
+        presented = (self.headers.get("Authorization") or "")
+        if not presented.startswith("Bearer "):
+            Platform.faults.append("no_bearer_header")
+            self.send_error(401)
+            return
+
+        token = presented[len("Bearer "):]
+        # refuse_access models a platform that rejects every token, including a
+        # freshly issued one — otherwise the renewal hands back a working token
+        # and the retry legitimately succeeds
+        if Platform.refuse_access or token not in Platform.live_access:
+            # Stands in for a token revoked on the platform since it was issued
+            self.send_error(401)
+            return
+
+        if "text/event-stream" not in (self.headers.get("Accept") or ""):
+            Platform.faults.append("did_not_accept_event_stream")
+
+        arguments = json.loads(body)["params"]["arguments"]
+
+        if arguments["serial_number"] != KNOWN_SERIAL:
+            self.json({"jsonrpc": "2.0", "id": 1, "result": {
+                "isError": True,
+                "content": [{"type": "text", "text": REFUSAL}]}})
+            return
+
+        self.json({"jsonrpc": "2.0", "id": 1, "result": {
+            "content": [{"type": "text", "text": "ok"}],
+            "structuredContent": DEVICE_RECORD}})
 
     def body_error(self, code, error):
         """An OAuth error carries its reason in a JSON body, not just a status."""
@@ -161,6 +220,8 @@ class Flow(unittest.TestCase):
     def setUp(self):
         Platform.issued, Platform.faults = {}, []
         Platform.live, Platform.spent = set(), set()
+        Platform.live_access, Platform.mcp_calls = {"at-1"}, []
+        Platform.refuse_access = False
         Platform.revoke_stalls = False
         self.server = http.server.HTTPServer(("127.0.0.1", 0), Platform)
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
@@ -182,14 +243,14 @@ class Flow(unittest.TestCase):
         self.consent_server.shutdown()
         self.consent_server.server_close()
 
-    def run_helper(self, command):
+    def run_helper(self, *command):
         environment = dict(os.environ,
                            XDG_STATE_HOME=self.state,
                            PULZAR_ISSUER=self.issuer,
                            PULZAR_CONSENT_ORIGIN=self.consent,
                            PULZAR_CLIENT_ID=CLIENT_ID,
                            PULZAR_NO_BROWSER="1")
-        finished = subprocess.run([sys.executable, HELPER, command],
+        finished = subprocess.run([sys.executable, HELPER] + list(command),
                                   capture_output=True, text=True, env=environment, timeout=60)
         lines = [json.loads(l) for l in finished.stdout.splitlines() if l.strip()]
         return finished, lines
@@ -515,6 +576,81 @@ class Flow(unittest.TestCase):
 
         # The sign-in still completes once the person reaches the URL
         self.assertEqual(rest[-1]["stage"], "signed_in")
+
+    def test_the_device_lookup_returns_a_parsed_record(self):
+        self.sign_in()
+        _, lines = self.run_helper("device", KNOWN_SERIAL)
+
+        answer = lines[-1]
+        self.assertTrue(answer["ok"])
+        self.assertTrue(answer["found"])
+        self.assertEqual(answer["device"]["serial_number"], KNOWN_SERIAL)
+        self.assertEqual(answer["device"]["assigned_to"]["name"], "Eduard Garcia")
+        self.assertEqual(Platform.faults, [])
+
+    def test_the_lookup_carries_the_bearer_token(self):
+        """The class of bug we just shipped was a correct value never arriving."""
+        self.sign_in()
+        self.run_helper("device", KNOWN_SERIAL)
+
+        self.assertEqual(len(Platform.mcp_calls), 1)
+        sent = json.loads(Platform.mcp_calls[0])
+        self.assertEqual(sent["method"], "tools/call")
+        self.assertEqual(sent["params"]["name"], "rzilient_my_device")
+        self.assertEqual(sent["params"]["arguments"]["response_format"], "json")
+        # no_bearer_header and did_not_accept_event_stream are recorded by the stub
+        self.assertEqual(Platform.faults, [])
+
+    def test_a_refusal_is_a_state_not_an_error(self):
+        """One message covers unknown, someone else's and unassigned alike."""
+        self.sign_in()
+        _, lines = self.run_helper("device", "NOTMINE1")
+
+        answer = lines[-1]
+        self.assertTrue(answer["ok"])
+        self.assertFalse(answer["found"])
+        self.assertEqual(answer["message"], REFUSAL)
+
+    def test_a_revoked_token_is_renewed_once_and_retried_once(self):
+        """A token can die between the expiry check and the call."""
+        self.sign_in()
+        # Revoked on the platform; the stored copy still looks unexpired
+        Platform.live_access.discard("at-1")
+
+        _, lines = self.run_helper("device", KNOWN_SERIAL)
+
+        self.assertTrue(lines[-1]["found"])
+        # One rejected call, one after the renewal — not a loop
+        self.assertEqual(len(Platform.mcp_calls), 2)
+
+    def test_a_token_the_platform_keeps_refusing_does_not_loop(self):
+        self.sign_in()
+        Platform.refuse_access = True
+
+        _, lines = self.run_helper("device", KNOWN_SERIAL)
+
+        self.assertFalse(lines[-1]["ok"])
+        self.assertEqual(lines[-1]["reason"], "device_lookup_401")
+        # Renewed once, retried once, then stopped
+        self.assertEqual(len(Platform.mcp_calls), 2)
+
+    def test_the_lookup_refuses_when_not_signed_in(self):
+        _, lines = self.run_helper("device", KNOWN_SERIAL)
+
+        self.assertFalse(lines[-1]["ok"])
+        self.assertEqual(lines[-1]["reason"], "not_signed_in")
+        self.assertEqual(Platform.mcp_calls, [])
+
+    def test_an_event_stream_answer_reads_the_same(self):
+        """Streamable HTTP lets the server answer either way."""
+        payload = json.dumps({"jsonrpc": "2.0", "id": 1,
+                              "result": {"structuredContent": DEVICE_RECORD}})
+        parsed = pulzar_auth.read_jsonrpc(
+            "event: message\ndata: " + payload + "\n\n", "text/event-stream")
+
+        self.assertEqual(parsed["result"]["structuredContent"]["serial_number"], KNOWN_SERIAL)
+        plain = pulzar_auth.read_jsonrpc(payload, "application/json")
+        self.assertEqual(plain, parsed)
 
     def test_the_pkce_pair_matches_the_rfc_vector(self):
         verifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"

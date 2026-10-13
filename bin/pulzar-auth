@@ -35,10 +35,6 @@ import urllib.request
 # the API answers /oauth/authorize with JSON, because a React consent card
 # drives it, so sending a browser there shows a payload instead of a consent
 # screen. The card lives at the dashboard origin, where the session is.
-# Overridable so a test can point it at a stub that records its argv; the
-# handoff to the desktop is otherwise the one step nothing exercises.
-OPENER = os.environ.get("PULZAR_OPENER") or "xdg-open"
-
 ISSUER = "https://api.rzilient.tech"
 CONSENT_ORIGIN = "https://join.rzilient.club"
 # The application is a device_agent, whose only permitted scope is this one.
@@ -46,6 +42,15 @@ CONSENT_ORIGIN = "https://join.rzilient.club"
 # /api/external/v1/* on purpose, because those controllers scope by tenant
 # rather than by person.
 SCOPE = "device_self"
+
+# The browser the authorize URL is handed to. Overridable so a test can point
+# it at a stub that records its argv: the handoff to the desktop is otherwise
+# the one step nothing exercises, which is how it shipped broken once.
+OPENER = os.environ.get("PULZAR_OPENER") or "xdg-open"
+
+# The tool the platform exposes to a device_self token, and the only one it can
+# reach. Asking tools/list with this scope returns exactly this.
+DEVICE_TOOL = "rzilient_my_device"
 # The panel should not hang on a sign-in nobody is completing
 WAIT_SECONDS = 180
 HTTP_TIMEOUT = 30
@@ -373,7 +378,8 @@ def login(issuer, client_id, consent_origin, open_browser=True):
     emit(ok=True, stage="signed_in", expires_at=stored["expires_at"], scope=stored["scope"])
 
 
-def refresh(issuer, client_id):
+def renew(issuer, client_id):
+    """Exchanges the refresh token for a new pair and stores it. Returns it."""
     current = load_credentials()
     if not current or not current.get("refresh_token"):
         fail("not_signed_in")
@@ -384,7 +390,11 @@ def refresh(issuer, client_id):
         "client_id": client_id,
     }, on_invalid_grant="reauthorize_required")
 
-    stored = store(tokens)
+    return store(tokens)
+
+
+def refresh(issuer, client_id):
+    stored = renew(issuer, client_id)
     emit(ok=True, stage="refreshed", expires_at=stored["expires_at"], scope=stored["scope"])
 
 
@@ -402,6 +412,107 @@ def status():
         expired=bool(expires_at and expires_at <= time.time()),
         scope=current.get("scope"),
     )
+
+
+# ------------------------------------------------------------------- device
+
+def read_jsonrpc(body, content_type):
+    """Reads one JSON-RPC answer out of a plain or event-stream response.
+
+    The transport is streamable HTTP, so the server may answer either as plain
+    JSON or as Server-Sent Events carrying the same object in a data: line.
+    Both are correct; which one arrives is the server's choice, so neither can
+    be assumed.
+    """
+    if "text/event-stream" in (content_type or ""):
+        for line in body.splitlines():
+            if line.startswith("data:"):
+                payload = line[len("data:"):].strip()
+                if payload:
+                    return json.loads(payload)
+        raise ValueError("no data: line in the event stream")
+
+    return json.loads(body)
+
+
+def call_tool(issuer, access_token, serial):
+    """Calls the device tool. Returns (answer, status); never raises for HTTP."""
+    body = json.dumps({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/call",
+        "params": {
+            "name": DEVICE_TOOL,
+            # Asking for json gives structuredContent, a parsed object, rather
+            # than markdown that would have to be scraped
+            "arguments": {"serial_number": serial, "response_format": "json"},
+        },
+    }).encode()
+
+    request = urllib.request.Request(
+        issuer.rstrip("/") + "/mcp",
+        data=body,
+        method="POST",
+        headers={
+            "Authorization": "Bearer " + access_token,
+            "Content-Type": "application/json",
+            # Streamable HTTP: the server picks one of these
+            "Accept": "application/json, text/event-stream",
+        },
+    )
+
+    try:
+        with urllib.request.urlopen(request, timeout=HTTP_TIMEOUT) as response:
+            return (read_jsonrpc(response.read().decode(),
+                                 response.headers.get("Content-Type")), 200)
+    except urllib.error.HTTPError as error:
+        error.read()
+        return (None, error.code)
+    except urllib.error.URLError as error:
+        fail("unreachable", str(error.reason))
+    except ValueError as error:
+        fail("unreadable_answer", str(error))
+
+
+def device(issuer, client_id, serial):
+    current = load_credentials()
+
+    if not current or not current.get("access_token"):
+        fail("not_signed_in")
+
+    expires_at = current.get("expires_at")
+    if expires_at and expires_at <= time.time():
+        current = renew(issuer, client_id)
+
+    answer, status = call_tool(issuer, current["access_token"], serial)
+
+    # A token can be revoked on the platform between the expiry check and the
+    # call, so one 401 is worth a renewal — and exactly one. A second would be
+    # a loop against a token the platform keeps refusing.
+    if status == 401:
+        current = renew(issuer, client_id)
+        answer, status = call_tool(issuer, current["access_token"], serial)
+
+    if status != 200:
+        fail("device_lookup_%d" % status)
+
+    if not isinstance(answer, dict) or "result" not in answer:
+        fail("unreadable_answer", json.dumps(answer)[:200] if answer else "")
+
+    result = answer["result"] or {}
+    content = result.get("content") or []
+    text = content[0].get("text", "") if content and isinstance(content[0], dict) else ""
+
+    # A refusal arrives as a successful call. The one message deliberately
+    # covers a serial the platform does not know, someone else's device and an
+    # unassigned one alike, so it is passed through as written rather than
+    # reworded into a certainty the platform did not express.
+    if result.get("isError"):
+        emit(ok=True, stage="device", found=False, message=text)
+        return
+
+    emit(ok=True, stage="device", found=True,
+         device=result.get("structuredContent") or {})
 
 
 def logout(issuer, client_id):
@@ -449,7 +560,7 @@ def main(argv):
     consent_origin = os.environ.get("PULZAR_CONSENT_ORIGIN") or CONSENT_ORIGIN
     client_id = os.environ.get("PULZAR_CLIENT_ID") or ""
 
-    if command in ("login", "refresh") and not client_id:
+    if command in ("login", "refresh", "device") and not client_id:
         fail("no_client_id", "set PULZAR_CLIENT_ID")
 
     if command == "login":
@@ -457,6 +568,11 @@ def main(argv):
               open_browser=os.environ.get("PULZAR_NO_BROWSER") != "1")
     elif command == "refresh":
         refresh(issuer, client_id)
+    elif command == "device":
+        serial = argv[2] if len(argv) > 2 else ""
+        if not serial:
+            fail("no_serial")
+        device(issuer, client_id, serial)
     elif command == "status":
         status()
     elif command == "logout":
