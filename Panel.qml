@@ -35,8 +35,6 @@ Panel {
   readonly property string iconSwap: "\u{F04E1}"
   readonly property string iconNetwork: "\u{F0317}"
 
-  // Arch's own page on dm-crypt: the distribution this runs on, and the only
-  // instructions that cover converting a partition that is already in use
   // The serial the platform knows this machine by. A literal for now, by
   // Eduard's decision: the real source is pulzar.status.device.serial, which
   // reads empty on this machine because the vendor left the DMI template and
@@ -44,6 +42,8 @@ Panel {
   // that line is the whole change once a machine reports a real serial.
   readonly property string platformSerial: "39P70Y2"
 
+  // Arch's own page on dm-crypt: the distribution this runs on, and the only
+  // instructions that cover converting a partition that is already in use
   readonly property string encryptionGuideUrl: "https://wiki.archlinux.org/title/Dm-crypt/Device_encryption#Encrypt_an_existing_unencrypted_file_system"
 
   // Feedback of the copy button
