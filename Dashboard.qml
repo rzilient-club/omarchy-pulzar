@@ -1,12 +1,12 @@
 import QtQuick
 import qs.Commons
 
-// The dashboard's own look, for the rzilient tab only.
+// The dashboard's shape, for the rzilient tab only.
 //
-// The rest of the panel follows the Omarchy theme, because it belongs to the
-// bar. This tab shows the platform, so it is meant to read as the platform —
-// the same greys, chips and spacing the dashboard uses. The two live side by
-// side deliberately and neither should be made to look like the other.
+// Its greys, its 16px cards, its 24px chips, its 8px scale and its timeline
+// geometry — so the tab reads as the platform rather than as the bar. The
+// typeface is deliberately not part of that: it follows the panel, so the two
+// tabs are recognisably one window.
 QtObject {
   id: root
 
@@ -15,13 +15,11 @@ QtObject {
   // below are only what to draw when a company has not been asked yet.
   property var tenant: null
 
-  readonly property string fontFamily: root.hasMontserrat ? "Montserrat" : root.fallbackFamily
-  // The dashboard loads Montserrat from Google Fonts and does not bundle it,
-  // so a desktop simply may not have it. Declaring it regardless would render
-  // in whatever fontconfig substitutes — silently, and not the dashboard's
-  // face. `ttf-montserrat` is in extra for anyone who wants the real thing.
-  readonly property bool hasMontserrat: Qt.fontFamilies().indexOf("Montserrat") >= 0
-  property string fallbackFamily: Style.font.family
+  // The panel's own family, set by whoever builds this. Eduard's decision: the
+  // tab matches the dashboard's shape — its sizes, weights, spacing, chips and
+  // timeline geometry — but not its typeface, which stays the one the rest of
+  // the plugin uses so the two tabs read as one panel.
+  property string fontFamily: Style.font.family
 
   // 8px scale
   function space(steps) { return Math.round(Style.space(8) * steps / 8) }

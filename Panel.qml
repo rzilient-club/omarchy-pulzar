@@ -152,7 +152,7 @@ Panel {
     id: dash
     tenant: session.deviceRecord && session.deviceRecord.theme
       ? session.deviceRecord.theme : null
-    fallbackFamily: tones.fontFamily
+    fontFamily: tones.fontFamily
   }
 
   Theme {
