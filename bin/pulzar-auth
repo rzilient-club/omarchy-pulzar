@@ -53,6 +53,13 @@ OPENER = os.environ.get("PULZAR_OPENER") or "xdg-open"
 DEVICE_TOOL = "rzilient_my_device"
 # The panel should not hang on a sign-in nobody is completing
 WAIT_SECONDS = 180
+
+# A token with a second left passes an exact expiry check, then 401s, then
+# costs a renewal and a retry anyway. Treating the last half minute as already
+# gone skips that round trip. This is a renewal policy, not a statement of
+# fact: `status` still reports expiry exactly, because the panel is describing
+# the token rather than deciding what to do about it.
+EXPIRY_MARGIN_SECONDS = 30
 HTTP_TIMEOUT = 30
 
 STATE_DIR = os.path.join(
@@ -343,11 +350,12 @@ def login(issuer, client_id, consent_origin, open_browser=True):
     # consent page then correctly reported a malformed request. There is no
     # quoting to get right here, only a shell not to use.
     opened = True
+    browser = None
 
     if open_browser:
         try:
-            subprocess.Popen([OPENER, authorize],
-                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            browser = subprocess.Popen([OPENER, authorize],
+                                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         except OSError:
             # Not fatal: the URL is in the line below, so the panel can still
             # offer it. Saying so beats a browser that silently never appears.
@@ -360,6 +368,13 @@ def login(issuer, client_id, consent_origin, open_browser=True):
     while Redirect.result is None and time.time() < deadline:
         server.handle_request()
     server.server_close()
+
+    # xdg-open hands off and exits almost immediately, long before anyone has
+    # consented, so by here it is a finished child nobody has collected. One
+    # poll reaps it. Not waiting on it: the browser it launched may outlive
+    # this process, and a sign-in must not depend on a window being closed.
+    if browser is not None:
+        browser.poll()
 
     if Redirect.result is None:
         fail("timed_out", "no redirect within %ds" % WAIT_SECONDS)
@@ -481,7 +496,7 @@ def device(issuer, client_id, serial):
         fail("not_signed_in")
 
     expires_at = current.get("expires_at")
-    if expires_at and expires_at <= time.time():
+    if expires_at and expires_at - EXPIRY_MARGIN_SECONDS <= time.time():
         current = renew(issuer, client_id)
 
     answer, status = call_tool(issuer, current["access_token"], serial)

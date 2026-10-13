@@ -652,6 +652,54 @@ class Flow(unittest.TestCase):
         plain = pulzar_auth.read_jsonrpc(payload, "application/json")
         self.assertEqual(plain, parsed)
 
+    def test_a_token_about_to_expire_is_renewed_before_it_is_used(self):
+        """An exact expiry check lets a token with seconds left through, which
+        then 401s and costs a round trip the margin avoids."""
+        self.sign_in()
+        path = os.path.join(self.state, "rzilient-pulzar", "credentials.json")
+        with open(path) as f:
+            stored = json.load(f)
+
+        # Valid, but inside the margin
+        stored["expires_at"] = int(time.time()) + 5
+        with open(path, "w") as f:
+            json.dump(stored, f)
+
+        _, lines = self.run_helper("device", KNOWN_SERIAL)
+
+        self.assertTrue(lines[-1]["found"])
+        # Renewed first, so the lookup took one call rather than 401-then-retry
+        self.assertEqual(len(Platform.mcp_calls), 1)
+        with open(path) as f:
+            self.assertEqual(json.load(f)["access_token"], "at-2")
+
+    def test_a_token_with_time_left_is_not_renewed(self):
+        self.sign_in()
+        _, lines = self.run_helper("device", KNOWN_SERIAL)
+
+        self.assertTrue(lines[-1]["found"])
+        with open(os.path.join(self.state, "rzilient-pulzar", "credentials.json")) as f:
+            # Still the original pair: nothing needed renewing
+            self.assertEqual(json.load(f)["access_token"], "at-1")
+
+    def test_the_browser_child_is_reaped(self):
+        """A finished child nobody collects is a zombie until the helper exits."""
+        stub, _ = self.opener_stub()
+        environment = dict(os.environ, XDG_STATE_HOME=self.state,
+                           PULZAR_ISSUER=self.issuer, PULZAR_CONSENT_ORIGIN=self.consent,
+                           PULZAR_CLIENT_ID=CLIENT_ID, PULZAR_OPENER=stub)
+        process = subprocess.Popen([sys.executable, HELPER, "login"],
+                                   stdout=subprocess.PIPE, text=True, env=environment)
+        with process.stdout as stream:
+            first = json.loads(stream.readline())
+            self.visit(first["url"])
+            stream.read()
+        process.wait(timeout=30)
+
+        # The helper exits cleanly rather than being held up by an uncollected
+        # child, and reports success
+        self.assertEqual(process.returncode, 0)
+
     def test_the_pkce_pair_matches_the_rfc_vector(self):
         verifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
         digest = hashlib.sha256(verifier.encode()).digest()
